@@ -286,43 +286,142 @@ export class AudioEngine {
     this.noise({ type: 'lowpass', freq: 800, dur: 0.6, gain: 0.25 });
   }
 
-  scream() {
+  // Grito del susto: voces distorsionadas con barrido de tono y vibrato, cuantización digital,
+  // banco de formantes (garganta), chirrido metálico con modulación en anillo, golpe grave y servo.
+  // Cada animatrónico tiene su timbre.
+  scream(kind = 'shriek', dur = 1.55) {
     if (!this.ctx) return;
+    const P = {
+      deep: { f: [92, 123, 138, 184], sweep: 1.35, vib: 17, vibAmt: 26, formants: [480, 860, 2200], screech: 1700, crush: 12, trem: 11 },
+      shriek: { f: [215, 272, 323, 431], sweep: 1.45, vib: 27, vibAmt: 55, formants: [820, 1450, 3100], screech: 2900, crush: 7, trem: 15 },
+      screech: { f: [262, 350, 392, 524], sweep: 1.55, vib: 33, vibAmt: 70, formants: [960, 1750, 3400], screech: 3400, crush: 6, trem: 17 },
+      howl: { f: [158, 211, 237, 316], sweep: 1.75, vib: 21, vibAmt: 48, formants: [640, 1120, 2650], screech: 2300, crush: 8, trem: 12 },
+    }[kind] || null;
+    if (!P) return this.scream('shriek', dur);
     const ctx = this.ctx;
     const t0 = ctx.currentTime;
+    const end = t0 + dur;
+    // Bus de salida con envolvente
     const out = ctx.createGain();
     out.gain.setValueAtTime(0.0001, t0);
-    out.gain.exponentialRampToValueAtTime(1.0, t0 + 0.03);
-    out.gain.setValueAtTime(1.0, t0 + 1.0);
-    out.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.6);
-    const shaper = ctx.createWaveShaper();
-    shaper.curve = this.shaper.curve;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 6500;
-    shaper.connect(lp).connect(out).connect(this.master);
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 23;
-    const lfoG = ctx.createGain();
-    lfoG.gain.value = 60;
-    lfo.connect(lfoG);
-    for (const [f, type] of [[190, 'sawtooth'], [283, 'sawtooth'], [401, 'square'], [557, 'sawtooth']]) {
-      const o = ctx.createOscillator();
-      o.type = type;
-      o.frequency.setValueAtTime(f * 0.8, t0);
-      o.frequency.exponentialRampToValueAtTime(f * 1.25, t0 + 0.25);
-      o.frequency.exponentialRampToValueAtTime(f * 0.95, t0 + 1.5);
-      lfoG.connect(o.frequency);
-      const g = ctx.createGain();
-      g.gain.value = 0.18;
-      o.connect(g).connect(shaper);
-      o.start(t0);
-      o.stop(t0 + 1.7);
+    out.gain.exponentialRampToValueAtTime(1.0, t0 + 0.025);
+    out.gain.setValueAtTime(1.0, end - 0.35);
+    out.gain.exponentialRampToValueAtTime(0.0001, end);
+    out.connect(this.master);
+    const rev = this.gain(0.25, this.reverb);
+    out.connect(rev);
+    // Voces
+    const voices = ctx.createGain();
+    voices.gain.value = 0.16;
+    const trem = ctx.createOscillator();
+    trem.frequency.value = P.trem;
+    const tremG = ctx.createGain();
+    tremG.gain.value = 0.06;
+    trem.connect(tremG).connect(voices.gain);
+    const drive = ctx.createWaveShaper();
+    drive.curve = this.shaper.curve;
+    drive.oversample = '2x';
+    const crush = ctx.createWaveShaper();
+    const cc = new Float32Array(4096);
+    for (let i = 0; i < cc.length; i++) {
+      const x = (i / (cc.length - 1)) * 2 - 1;
+      cc[i] = Math.round(x * P.crush) / P.crush;
     }
-    lfo.start(t0);
-    lfo.stop(t0 + 1.7);
-    this.noise({ type: 'bandpass', freq: 1600, q: 0.7, dur: 1.5, gain: 0.9, dest: this.master });
-    this.osc({ freq: 55, freqEnd: 30, dur: 0.8, gain: 1.0, dest: this.master });
+    crush.curve = cc;
+    voices.connect(drive).connect(crush);
+    const dry = ctx.createBiquadFilter();
+    dry.type = 'lowpass';
+    dry.frequency.value = 5200;
+    const dryG = ctx.createGain();
+    dryG.gain.value = 0.55;
+    crush.connect(dry).connect(dryG).connect(out);
+    P.formants.forEach((ff, i) => {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(ff * 0.8, t0);
+      bp.frequency.linearRampToValueAtTime(ff * 1.15, t0 + 0.2);
+      bp.frequency.linearRampToValueAtTime(ff * 0.9, end);
+      bp.Q.value = 5 + i * 2;
+      const g = ctx.createGain();
+      g.gain.value = [1.3, 0.9, 0.5][i];
+      crush.connect(bp).connect(g).connect(out);
+    });
+    const vib = ctx.createOscillator();
+    vib.frequency.value = P.vib;
+    const vibG = ctx.createGain();
+    vibG.gain.value = P.vibAmt;
+    vib.connect(vibG);
+    const types = ['sawtooth', 'square', 'sawtooth', 'sawtooth'];
+    P.f.forEach((f, i) => {
+      for (const det of [-14, 11]) {
+        const o = ctx.createOscillator();
+        o.type = types[i];
+        o.detune.value = det + (Math.random() - 0.5) * 10;
+        o.frequency.setValueAtTime(f * 0.7, t0);
+        o.frequency.exponentialRampToValueAtTime(f * P.sweep, t0 + 0.16);
+        o.frequency.exponentialRampToValueAtTime(f * 1.05, t0 + dur * 0.7);
+        o.frequency.exponentialRampToValueAtTime(f * 0.78, end);
+        vibG.connect(o.frequency);
+        o.connect(voices);
+        o.start(t0);
+        o.stop(end + 0.05);
+      }
+    });
+    // Chirrido metálico con modulación en anillo y paneo inquieto
+    const scr = ctx.createOscillator();
+    scr.type = 'triangle';
+    scr.frequency.setValueAtTime(P.screech * 0.8, t0);
+    scr.frequency.exponentialRampToValueAtTime(P.screech * 1.2, t0 + 0.3);
+    scr.frequency.exponentialRampToValueAtTime(P.screech * 0.9, end);
+    const jit = ctx.createOscillator();
+    jit.frequency.value = 7.3;
+    const jitG = ctx.createGain();
+    jitG.gain.value = P.screech * 0.04;
+    jit.connect(jitG).connect(scr.frequency);
+    const ring = ctx.createGain();
+    ring.gain.value = 0;
+    const mod = ctx.createOscillator();
+    mod.frequency.value = 173;
+    const modG = ctx.createGain();
+    modG.gain.value = 0.09;
+    mod.connect(modG).connect(ring.gain);
+    const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : ctx.createGain();
+    if (pan.pan) {
+      const pl = ctx.createOscillator();
+      pl.frequency.value = 4.7;
+      const plG = ctx.createGain();
+      plG.gain.value = 0.55;
+      pl.connect(plG).connect(pan.pan);
+      pl.start(t0);
+      pl.stop(end + 0.05);
+    }
+    scr.connect(ring).connect(pan).connect(out);
+    // Ruido de garganta
+    this.noise({ type: 'bandpass', freq: 3200, freqEnd: 1100, q: 0.8, dur, gain: 0.55, dest: out, attack: 0.01 });
+    // Golpe de impacto y servo
+    this.osc({ freq: 52, freqEnd: 26, dur: 0.95, gain: 1.0, dest: this.master });
+    this.noise({ type: 'lowpass', freq: 500, freqEnd: 90, dur: 0.35, gain: 0.9, dest: this.master, brown: true });
+    this.osc({ type: 'sawtooth', freq: 380, freqEnd: 1400, dur: 0.45, gain: 0.06, dest: this.master });
+    for (const n of [trem, vib, jit, mod, scr]) {
+      n.start(t0);
+      n.stop(end + 0.05);
+    }
+  }
+
+  // Golpe seco con estática (destellos del susto y alucinaciones).
+  hit(gain = 0.5) {
+    if (!this.ctx) return;
+    this.noise({ type: 'highpass', freq: 1200, dur: 0.18, gain: gain * 0.6, curve: 'lin' });
+    this.osc({ freq: 80, freqEnd: 35, dur: 0.3, gain });
+    for (const f of [311, 330, 466]) this.osc({ type: 'sawtooth', freq: f, dur: 0.35, gain: gain * 0.06 });
+  }
+
+  // Gruñido grave y servos (Bruno se acerca antes de abalanzarse).
+  creep() {
+    if (!this.ctx) return;
+    this.osc({ type: 'sawtooth', freq: 55, freqEnd: 62, dur: 0.9, gain: 0.12, attack: 0.2 });
+    this.noise({ type: 'bandpass', freq: 300, q: 3, dur: 0.9, gain: 0.25, attack: 0.3 });
+    this.servo({ x: 0, y: 1.5, z: 0.5 }, 0.08);
   }
 
   bang(pos) {

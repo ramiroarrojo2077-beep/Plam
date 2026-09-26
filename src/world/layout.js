@@ -132,7 +132,7 @@ export const LIGHTS = {
   ehC: { type: 'point', pos: [5.0, 2.8, -4.2], color: 0xcfe8dc, intensity: 0.55, distance: 7, flicker: 'fluoro', seed: 4 },
   moon: { type: 'point', pos: [0, 2.6, 2.0], color: 0x4a5a8a, intensity: 0.25, distance: 8, battery: true },
   faceLight: { type: 'spot', pos: [-3.2, 0.9, -0.6], target: [-4.5, 2.2, -1.2], angle: 0.5, penumbra: 0.8, color: 0xffb070, intensity: 14, distance: 5, shadow: true, battery: true },
-  scare: { type: 'point', pos: [0, 1.5, 0.6], color: 0xffd8b0, intensity: 1.1, distance: 5, flicker: 'scare', battery: true },
+  scare: { type: 'point', pos: [0, 1.5, 0.6], color: 0xffd8b0, intensity: 1.8, distance: 5, flicker: 'scare', battery: true },
 
   // Pasillos
   wh1: { type: 'point', pos: [-5.0, 2.8, -17.5], color: 0xd8f0e2, intensity: 2.2, distance: 9, flicker: 'fluoro', seed: 1 },

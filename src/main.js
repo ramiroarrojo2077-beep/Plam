@@ -341,6 +341,8 @@ class Game {
   }
 
   stopNight() {
+    if (this.halluc) this.halluc.who.setHollow(false);
+    this.halluc = null;
     if (this.night) this.night.stopAudio();
     this.phone?.stop();
     this.night = null;
@@ -429,23 +431,45 @@ class Game {
     char.stop();
     char.root.visible = true;
     char.setHollow(false);
-    char.setPose('scare', 16);
-    char.jaw.target = 1;
-    char.jaw.chatter = 1;
-    char.shake = 1;
-    char.eyeGlowTarget = 1.3;
+    char.perform = null;
     char.twitch.rate = 0;
     char.lookAt(EYE, 30);
     const yawTo = side === 'L' ? 0.85 : side === 'R' ? -0.85 : 0;
-    char.perform = null;
-    const prof = { fox: { from: 3.6, dur: 0.34, hop: 0.24 }, bear: { from: 1.6, dur: 0.4, hop: 0 }, bunny: { from: 1.8, dur: 0.2, hop: 0 }, chicken: { from: 1.8, dur: 0.24, hop: 0 } }[char.id];
-    this.js = { t: 0, char, yawFrom: this.yaw, yawTo, headOff: null, prof, snapped: false };
+    // Coreografía de cada animatrónico
+    const prof = {
+      bear: { from: 2.0, pre: 0.6, dur: 0.3, hop: 0, scream: 'deep', tilt: 0.45 },
+      bunny: { from: 2.0, pre: 0, dur: 0.16, hop: 0, scream: 'shriek', tilt: -0.35 },
+      chicken: { from: 1.9, pre: 0, dur: 0.2, hop: 0, scream: 'screech', tilt: 0.3, flap: true },
+      fox: { from: 4.3, pre: 0, dur: 0.34, hop: 0.3, scream: 'howl', tilt: -0.2 },
+    }[char.id];
+    this.js = { t: 0, char, yawFrom: this.yaw, yawTo, headOff: null, prof, snaps: 0, screamed: false, flick: 0, seed: Math.random() * 10 };
     this.audio.stopAmbient();
-    this.audio.scream();
+    if (prof.pre > 0) {
+      char.setPose('stare', 3);
+      char.jaw.target = 0.25;
+      char.eyeGlowTarget = 2.2;
+      this.audio.creep();
+    } else this.screamNow();
+  }
+
+  screamNow() {
+    const J = this.js;
+    const c = J.char;
+    J.screamed = true;
+    c.setPose('scare', 18);
+    c.jaw.target = 1;
+    c.jaw.chatter = 1;
+    c.shake = 1.15;
+    c.eyeGlowTarget = 1.6;
+    this.audio.scream(J.prof.scream);
+    this.fx.flash = 0.45;
+    this.fx.static = 0.35;
   }
 
   gameOver() {
     this.state = 'gameover';
+    this.fx.fade = 0;
+    this.renderer.toneMappingExposure = 1;
     this.ui.only('gameover');
     const msgs = ['Te han metido en un traje.', 'Nadie vendrá a buscarte.', 'La pizzería abrirá mañana, como siempre.', 'Deberías haber vigilado las puertas.'];
     this.ui.gameover(msgs[Math.floor(Math.random() * msgs.length)]);
@@ -500,6 +524,17 @@ class Game {
     this.ui.setCam(CAM_BY_ID[id]);
     this.audio.camBlip();
     this.fx.static = 0.9;
+    // Alucinación: a veces, al cambiar de cámara, aparece un rostro durante un instante
+    const chance = n.custom ? 0.05 : [0, 0, 0.03, 0.04, 0.05, 0.06, 0.07][Math.min(6, n.num)] + n.hour * 0.004;
+    if (!this.halluc && n.t > 20 && Math.random() < chance) {
+      const who = this.chars[KINDS[Math.floor(Math.random() * 3)]];
+      this.halluc = { t: 0.32, who, hollow: who.hollow };
+      who.setHollow(true);
+      who.eyeGlowTarget = 2.5;
+      who.eyeGlow = 2.5;
+      this.audio.hit(0.7);
+      this.fx.glitch = 1;
+    }
   }
 
   // ================================================================ galería
@@ -566,7 +601,7 @@ class Game {
       c.shake = 0.7;
       c.eyeGlowTarget = 2.5;
       c.twitch.rate = 0;
-      this.audio.scream();
+      this.audio.scream({ bear: 'deep', bunny: 'shriek', chicken: 'screech', fox: 'howl' }[c.id]);
       this.fx.glitch = 1;
     }
   }
@@ -986,7 +1021,31 @@ class Game {
     if (n.monitorUp) {
       this.updateSecCam();
       this.ui.setTimestamp(n);
-    } else this.updateOfficeCam(dt);
+      if (this.halluc) {
+        const H = this.halluc;
+        H.t -= dt;
+        const head = H.who.j.head.getWorldPosition(new THREE.Vector3());
+        head.y += 0.18;
+        const fwd = new THREE.Vector3(Math.sin(H.who.heading), 0, Math.cos(H.who.heading));
+        this.camera.position.copy(head).addScaledVector(fwd, 0.62).add(new THREE.Vector3((Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02, 0));
+        this.camera.lookAt(head);
+        this.camera.fov = 58;
+        this.camera.updateProjectionMatrix();
+        this.fx.static = Math.max(this.fx.static, 0.3);
+        if (H.t <= 0) {
+          H.who.setHollow(H.hollow);
+          H.who.eyeGlowTarget = 0.6;
+          this.halluc = null;
+          this.fx.static = 1;
+        }
+      }
+    } else {
+      if (this.halluc) {
+        this.halluc.who.setHollow(this.halluc.hollow);
+        this.halluc = null;
+      }
+      this.updateOfficeCam(dt);
+    }
     this.ui.setHUD(n);
     this.ui.setTouchState({ doorL: n.state.doorL, doorR: n.state.doorR, lightL: n.state.lightL, lightR: n.state.lightR });
     // Cursor sobre botones
@@ -1007,21 +1066,23 @@ class Game {
     const J = this.js;
     J.t += dt;
     const c = J.char;
+    const P = J.prof;
     const k = Math.min(1, J.t / 0.14);
     this.yaw = J.yawFrom + (J.yawTo - J.yawFrom) * (1 - Math.pow(1 - k, 3));
     const f = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    const P = J.prof;
-    const lunge = Math.min(1, J.t / P.dur);
-    const dist = P.from - (P.from - 0.6) * (1 - Math.pow(1 - lunge, 2));
-    c.treadmill = c.id === 'fox' && lunge < 1 ? 'run' : null;
-    if (!J.snapped && J.t > 0.55) {
-      // Latigazo de cabeza a mitad del grito
-      J.snapped = true;
-      c.sec.headR.v += (Math.random() < 0.5 ? -1 : 1) * 7;
-      c.sec.headP.v -= 4;
-      c.sec.jaw.v += 5;
-      this.fx.flash = 0.12;
+    const tl = J.t - P.pre;
+    if (tl >= 0 && !J.screamed) this.screamNow();
+    // Distancia: acecho -> embestida -> sacudida -> embestida final contra la cámara
+    let dist;
+    let lunge = 0;
+    if (tl < 0) dist = P.from - 0.3 * (J.t / P.pre);
+    else {
+      lunge = Math.min(1, tl / P.dur);
+      const from = P.pre > 0 ? P.from - 0.3 : P.from;
+      dist = from - (from - 0.62) * (1 - Math.pow(1 - lunge, 2));
+      if (tl > 1.02) dist -= Math.min(1, (tl - 1.02) / 0.22) * 0.42;
     }
+    c.treadmill = c.id === 'fox' && tl >= 0 && lunge < 1 ? 'run' : null;
     const s = c.body.scale.x;
     if (J.headOff === null) {
       c.root.position.set(0, 0, 0);
@@ -1029,17 +1090,60 @@ class Game {
       c.root.updateMatrixWorld(true);
       J.headOff = c.j.head.getWorldPosition(new THREE.Vector3()).y + 0.2 * s;
     }
-    c.root.position.set(EYE.x + f.x * dist, EYE.y - J.headOff + 0.02 + P.hop * Math.sin(Math.PI * lunge), EYE.z + f.z * dist);
+    const hop = P.hop * Math.sin(Math.PI * lunge) * (tl >= 0 ? 1 : 0);
+    c.root.position.set(EYE.x + f.x * dist, EYE.y - J.headOff + 0.02 + hop, EYE.z + f.z * dist);
     c.heading = this.yaw;
     c.root.rotation.y = this.yaw;
-    const shake = Math.max(0, 1 - J.t / 1.3);
-    this.camera.position.copy(EYE);
-    this.camera.rotation.set(-0.02 + (Math.random() - 0.5) * 0.05 * shake, this.yaw + (Math.random() - 0.5) * 0.06 * shake, (Math.random() - 0.5) * 0.04 * shake);
-    this.setFovH(96 - Math.sin(Math.min(1, J.t / 0.3) * Math.PI) * 10 + (J.snapped ? Math.max(0, 1 - (J.t - 0.55) * 4) * 8 : 0));
+    if (tl >= 0) {
+      // Brazos que se estiran hacia el jugador, cabeza ladeada, aleteo (Chiqui)
+      const reach = Math.min(0.45, tl * 0.6);
+      c.goal.shoulderL.x = -1.35 - reach;
+      c.goal.shoulderR.x = -1.35 - reach;
+      c.goal.head.z = P.tilt * Math.min(1, tl * 3);
+      if (P.flap) {
+        c.goal.shoulderL.z = 0.55 + Math.sin(J.t * 32) * 0.35;
+        c.goal.shoulderR.z = -0.55 - Math.sin(J.t * 32) * 0.35;
+      }
+      // Latigazos de cabeza
+      for (const [when, amp] of [[0.45, 7], [0.82, -8]]) {
+        if (tl > when && J.snaps < (when === 0.45 ? 1 : 2)) {
+          J.snaps++;
+          c.sec.headR.v += (Math.random() < 0.5 ? -1 : 1) * amp;
+          c.sec.headP.v -= 4;
+          c.sec.jaw.v += 6;
+          this.fx.flash = 0.2;
+          this.audio.hit(0.35);
+        }
+      }
+      // Ojos que parpadean entre normales y vacíos
+      J.flick -= dt;
+      if (tl > 0.15 && tl < 1.15 && J.flick <= 0) {
+        J.flick = 0.05 + Math.random() * 0.12;
+        c.setHollow(Math.random() < 0.55);
+      }
+    }
+    // Cámara: sacudida rotacional y posicional, golpe de FOV
+    const intensity = tl < 0 ? 0.12 : Math.max(0.25, 1 - tl / 1.6) + (tl > 1.02 ? 0.6 : 0);
+    const n1 = Math.sin(J.t * 47 + J.seed) + Math.sin(J.t * 31 + J.seed * 2) * 0.6;
+    const n2 = Math.sin(J.t * 53 + J.seed * 3) + Math.sin(J.t * 29) * 0.6;
+    const n3 = Math.sin(J.t * 41 + J.seed * 5);
+    this.camera.position.set(EYE.x + n2 * 0.012 * intensity, EYE.y + n1 * 0.012 * intensity, EYE.z);
+    this.camera.rotation.set(-0.02 + n1 * 0.03 * intensity, this.yaw + n2 * 0.035 * intensity, n3 * 0.03 * intensity);
+    let fov = 96;
+    if (tl >= 0) fov -= Math.sin(Math.min(1, tl / 0.3) * Math.PI) * 12;
+    if (tl > 1.02) fov -= Math.min(1, (tl - 1.02) / 0.2) * 14;
+    this.setFovH(fov);
     this.rig.movePoint('scare', new THREE.Vector3(EYE.x - f.z * 0.6, EYE.y + 0.9, EYE.z + f.x * 0.6));
-    this.fx.glitch = 0.25 + J.t * 0.5;
-    if (J.t > 1.05) this.fx.static = Math.min(1, (J.t - 1.05) * 3);
-    if (J.t > 1.4) this.gameOver();
+    // Efectos de pantalla: parpadeos a negro, pulsos de exposición, estática
+    this.fx.glitch = tl < 0 ? 0.15 : 0.35 + Math.max(0, Math.sin(J.t * 23)) * 0.5;
+    this.fx.fade = tl > 0.25 && tl < 1.0 && Math.random() < 0.07 ? 1 : 0;
+    this.renderer.toneMappingExposure = 1 + Math.max(0, Math.sin(J.t * 37)) * 0.35 * intensity;
+    if (tl > 0.3 && Math.random() < dt * 4) this.fx.static = Math.max(this.fx.static, 0.35);
+    if (tl > 1.18) this.fx.static = Math.min(1, (tl - 1.18) * 4);
+    if (tl > 1.45) {
+      c.setHollow(true);
+      this.gameOver();
+    }
   }
 
   // Planos del menú: primeros planos de cada animatrónico actuando, plano general del
