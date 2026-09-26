@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --fg: #e8e6df;
   --muted: #8b8a85;
   --red: #c4161c;
@@ -13,6 +14,7 @@
 html, body {
   margin: 0;
   height: 100%;
+  width: 100%;
   overflow: hidden;
   background: #000;
   color: var(--fg);
@@ -25,8 +27,8 @@ html, body {
 #game {
   position: fixed;
   inset: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   display: block;
   background: #000;
 }

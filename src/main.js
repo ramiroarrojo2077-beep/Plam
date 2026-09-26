@@ -1002,8 +1002,11 @@ class Game {
 
 const game = new Game();
 window.__game = game;
-game.init().catch((err) => {
-  console.error(err);
-  const t = document.getElementById('load-text');
-  if (t) t.textContent = 'Error al iniciar: ' + err.message;
-});
+const start = () =>
+  game.init().catch((err) => {
+    console.error(err);
+    const t = document.getElementById('load-text');
+    if (t) t.textContent = 'Error al iniciar: ' + err.message;
+  });
+if (window.claude?.hot?.ready) window.claude.hot.ready(start);
+else start();

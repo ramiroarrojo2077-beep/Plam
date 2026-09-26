@@ -6,13 +6,18 @@ en el navegador, sin un solo archivo de imagen, modelo o audio externo.
 
 ## Cómo jugar
 
+**Lo más fácil:** descarga [`cinco-noches.html`](cinco-noches.html) y ábrelo con doble clic en Chrome, Edge o Firefox.
+Es un único archivo con todo incrustado (código, Three.js y estilos): no necesita npm ni servidor.
+
+Para desarrollar:
+
 ```bash
 npm install
-npm run dev      # abre http://localhost:5173
+npm run dev          # abre http://localhost:5173
+npm run build:html   # regenera cinco-noches.html (archivo único)
 ```
 
-Para generar la versión estática: `npm run build` (queda en `dist/`, se puede subir a cualquier hosting estático,
-por ejemplo GitHub Pages) y `npm run preview` para probarla.
+`npm run build` genera la versión en varios archivos en `dist/` para cualquier hosting estático.
 
 ### Controles
 
