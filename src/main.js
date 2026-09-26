@@ -67,7 +67,7 @@ class Game {
     this.night = null;
     this.monitorAnim = null;
     this.menu = { idx: 0, t: 0 };
-    this.gallery = { idx: 0, yaw: 0.3, pitch: 0.08, dist: 3.8, mode: 'idle', auto: true };
+    this.gallery = { idx: 0, yaw: 0.3, pitch: 0.1, dist: 4.3, mode: 'idle', auto: true };
     this.raycaster = new THREE.Raycaster();
     this.lastT = performance.now();
     window.addEventListener('resize', () => this.resize());
@@ -200,6 +200,8 @@ class Game {
     this.post.setSize(w, h, pr);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    const ms = Math.min(1, (h * 0.55) / 350, (w * 0.42) / 300);
+    document.documentElement.style.setProperty('--map-scale', ms.toFixed(3));
   }
 
   setFovH(hdeg) {
@@ -376,7 +378,7 @@ class Game {
     char.jaw.target = 1;
     char.jaw.chatter = 1;
     char.shake = 1;
-    char.eyeGlowTarget = 2.8;
+    char.eyeGlowTarget = 1.3;
     char.twitch.rate = 0;
     char.lookAt(EYE, 30);
     const yawTo = side === 'L' ? 0.85 : side === 'R' ? -0.85 : 0;
@@ -946,7 +948,7 @@ class Game {
     this.camera.position.copy(EYE);
     this.camera.rotation.set(-0.02 + (Math.random() - 0.5) * 0.05 * shake, this.yaw + (Math.random() - 0.5) * 0.06 * shake, (Math.random() - 0.5) * 0.04 * shake);
     this.setFovH(96);
-    this.rig.movePoint('scare', new THREE.Vector3(EYE.x + f.x * 0.15, EYE.y + 0.35, EYE.z + f.z * 0.15));
+    this.rig.movePoint('scare', new THREE.Vector3(EYE.x - f.z * 0.6, EYE.y + 0.9, EYE.z + f.x * 0.6));
     this.fx.glitch = 0.25 + J.t * 0.5;
     if (J.t > 1.05) this.fx.static = Math.min(1, (J.t - 1.05) * 3);
     if (J.t > 1.4) this.gameOver();
@@ -989,7 +991,7 @@ class Game {
     const c = this.chars[KINDS[G.idx]];
     const head = c.j.head.getWorldPosition(new THREE.Vector3());
     const zoom = clamp((4 - G.dist) / 2.4, 0, 1);
-    const center = new THREE.Vector3(0, 2.05 + (head.y + 0.1 - 2.05) * zoom, -33.6 + (head.z - -33.6) * zoom);
+    const center = new THREE.Vector3(0, 2.12 + (head.y + 0.1 - 2.12) * zoom, -33.6 + (head.z - -33.6) * zoom);
     const d = G.dist;
     this.camera.position.set(center.x + Math.sin(G.yaw) * Math.cos(G.pitch) * d, center.y + Math.sin(G.pitch) * d, center.z + Math.cos(G.yaw) * Math.cos(G.pitch) * d);
     this.camera.lookAt(center);

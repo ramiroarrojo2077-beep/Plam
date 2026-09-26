@@ -180,13 +180,13 @@ button:disabled { color: rgba(200, 196, 186, 0.28); text-shadow: none; cursor: n
 .gallery-nav button { font-size: 44px; line-height: 1; }
 .gallery-desc {
   position: absolute;
-  top: 70px;
+  bottom: 96px;
   left: 50%;
   transform: translateX(-50%);
   width: min(640px, calc(100vw - 32px));
   text-align: center;
   color: #bdb9ae;
-  font-size: 20px;
+  font-size: 18px;
   text-shadow: 0 0 8px #000;
 }
 .gallery-bottom {
@@ -232,7 +232,8 @@ button:disabled { color: rgba(200, 196, 186, 0.28); text-shadow: none; cursor: n
 #mute-call {
   position: absolute;
   top: 16px;
-  left: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 20px;
   border: 1px solid #aaa;
   background: rgba(0, 0, 0, 0.5);
@@ -240,11 +241,10 @@ button:disabled { color: rgba(200, 196, 186, 0.28); text-shadow: none; cursor: n
 }
 #subtitles {
   position: absolute;
-  bottom: 96px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(820px, calc(100vw - 32px));
-  text-align: center;
+  bottom: 110px;
+  left: 18px;
+  width: min(620px, 52vw);
+  text-align: left;
   font-size: clamp(18px, 2.2vw, 24px);
   color: #f4f1e8;
   text-shadow: 0 0 4px #000, 0 0 8px #000;
@@ -317,7 +317,7 @@ button:disabled { color: rgba(200, 196, 186, 0.28); text-shadow: none; cursor: n
 .cam-label { position: absolute; top: 64px; left: 34px; font-size: 30px; text-shadow: 0 0 4px #000; }
 #cam-id { color: #fff; }
 #cam-name { color: #d7d4c8; font-size: 0.8em; }
-#cam-timestamp { position: absolute; bottom: 30px; left: 34px; font-size: 22px; color: rgba(255, 255, 255, 0.75); text-shadow: 0 0 4px #000; }
+#cam-timestamp { position: absolute; top: 100px; left: 34px; font-size: 22px; color: rgba(255, 255, 255, 0.75); text-shadow: 0 0 4px #000; }
 #cam-audio-only {
   position: absolute;
   top: 42%;
@@ -332,6 +332,8 @@ button:disabled { color: rgba(200, 196, 186, 0.28); text-shadow: none; cursor: n
   right: 30px;
   bottom: 70px;
   pointer-events: auto;
+  transform: scale(var(--map-scale, 1));
+  transform-origin: bottom right;
 }
 #cam-map svg { display: block; overflow: visible; }
 #cam-map .room { fill: rgba(0, 0, 0, 0.35); stroke: rgba(255, 255, 255, 0.85); stroke-width: 2; }
@@ -394,7 +396,7 @@ button:disabled { color: rgba(200, 196, 186, 0.28); text-shadow: none; cursor: n
 #fade.on { opacity: 1; }
 
 @media (max-width: 640px) {
-  #cam-map { right: 16px; bottom: 60px; transform: scale(0.72); transform-origin: bottom right; }
+  #cam-map { right: 16px; bottom: 60px; }
   .cam-rec, .cam-label { left: 24px; font-size: 22px; }
   .cam-label { top: 50px; }
   .menu-help { display: none; }

@@ -107,7 +107,7 @@ export function spotFor(room, who) {
 
 // Cámaras de seguridad. `rooms`: salas lógicas que se ven desde esa cámara.
 export const CAMS = [
-  { id: '1A', name: 'Escenario', pos: [0.4, 3.9, -21.3], look: [0, 2.0, -34.6], fov: 42, pan: 0.08, rooms: ['STAGE'], lights: ['stageL', 'stageC', 'stageR', 'dining1', 'signGlow'], map: [0, -33] },
+  { id: '1A', name: 'Escenario', pos: [0.4, 3.9, -21.3], look: [0, 1.95, -34.6], fov: 34, pan: 0.08, rooms: ['STAGE'], lights: ['stageL', 'stageC', 'stageR', 'dining1', 'signGlow'], map: [0, -33] },
   { id: '1B', name: 'Comedor', pos: [-10.5, 3.9, -20.8], look: [1.5, 0.6, -29], fov: 62, pan: 0.22, rooms: ['DINING'], lights: ['stageL', 'stageC', 'stageR', 'dining1', 'dining2', 'dining3', 'signGlow'], map: [-2, -26] },
   { id: '1C', name: 'Cueva pirata', pos: [-7.2, 3.5, -21.0], look: [-12.6, 1.1, -25], fov: 50, pan: 0.1, rooms: ['COVE'], lights: ['coveSpot', 'coveGlow', 'dining2'], map: [-12.8, -25] },
   { id: '2A', name: 'Pasillo oeste', pos: [-5.95, 2.78, -5.6], look: [-5.0, 0.9, -20.5], fov: 58, pan: 0.0, rooms: ['WEST_HALL'], lights: ['wh1', 'wh2', 'whC'], map: [-5, -13] },
@@ -133,7 +133,7 @@ export const LIGHTS = {
   ehC: { type: 'point', pos: [5.0, 2.8, -4.2], color: 0xcfe8dc, intensity: 0.55, distance: 7, flicker: 'fluoro', seed: 4 },
   moon: { type: 'point', pos: [0, 2.6, 2.0], color: 0x4a5a8a, intensity: 0.25, distance: 8, battery: true },
   faceLight: { type: 'spot', pos: [-3.2, 0.9, -0.6], target: [-4.5, 2.2, -1.2], angle: 0.5, penumbra: 0.8, color: 0xffb070, intensity: 14, distance: 5, shadow: true, battery: true },
-  scare: { type: 'point', pos: [0, 1.5, 0.6], color: 0xffe0c0, intensity: 3, distance: 4, flicker: 'scare', battery: true },
+  scare: { type: 'point', pos: [0, 1.5, 0.6], color: 0xffd8b0, intensity: 1.1, distance: 5, flicker: 'scare', battery: true },
 
   // Pasillos
   wh1: { type: 'point', pos: [-5.0, 2.8, -17.5], color: 0xd8f0e2, intensity: 2.2, distance: 9, flicker: 'fluoro', seed: 1 },
@@ -154,7 +154,7 @@ export const LIGHTS = {
   coveSpot: { type: 'spot', pos: [-9.2, 4.1, -24.0], target: [-11.4, 1.0, -25], angle: 0.6, penumbra: 0.6, color: 0xd0a0ff, intensity: 30, distance: 10, shadow: true },
   coveGlow: { type: 'point', pos: [-13.2, 2.8, -25], color: 0x8a50c0, intensity: 1.4, distance: 6, flicker: 'bulb', seed: 10 },
   closetBulb: { type: 'point', pos: [-2.0, 2.55, -9.3], color: 0xffd8a0, intensity: 2.2, distance: 6, flicker: 'bulb', seed: 11 },
-  bsBulb: { type: 'point', pos: [-13.8, 2.6, -33.4], color: 0xffcf90, intensity: 3.2, distance: 9, flicker: 'bulb', seed: 12 },
+  bsBulb: { type: 'point', pos: [-13.8, 2.6, -33.4], color: 0xffcf90, intensity: 5, distance: 9, flicker: 'bulb', seed: 12 },
   restroom: { type: 'point', pos: [14.2, 2.9, -33.5], color: 0xe8fff4, intensity: 3.2, distance: 9, flicker: 'fluoro', seed: 13 },
   kitchen: { type: 'point', pos: [14.2, 2.9, -24.5], color: 0xffe0b0, intensity: 1.2, distance: 8, flicker: 'fluoro', seed: 14 },
 
