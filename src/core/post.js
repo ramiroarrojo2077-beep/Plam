@@ -8,12 +8,46 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+
+// Objetos que no deben entrar en los buffers de profundidad/normales (haces de luz, polvo,
+// decals transparentes, capas de pelo): se ocultan durante esas pasadas auxiliares.
+function hideAux(scene, cache) {
+  scene.traverse((o) => {
+    if (o.visible && (o.userData.noAO || o.userData.furShell || o.isPoints || o.isLine)) {
+      o.visible = false;
+      cache.push(o);
+    }
+  });
+}
+function restoreAux(cache) {
+  for (const o of cache) o.visible = true;
+  cache.length = 0;
+}
+
+class CleanGTAOPass extends GTAOPass {
+  _overrideVisibility() {
+    hideAux(this.scene, this._visibilityCache);
+  }
+}
+
+class DOFPass extends BokehPass {
+  constructor(scene, camera, params) {
+    super(scene, camera, params);
+    this._cache = [];
+  }
+  render(renderer, writeBuffer, readBuffer, deltaTime, maskActive) {
+    hideAux(this.scene, this._cache);
+    super.render(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+    restoreAux(this._cache);
+  }
+}
 
 export const QUALITY = {
-  low: { pixelRatio: 0.6, shadow: 512, bloom: false, smaa: false, aniso: 2, shells: 0, ao: false },
-  medium: { pixelRatio: 0.8, shadow: 1024, bloom: true, smaa: false, aniso: 4, shells: 5, ao: false },
-  high: { pixelRatio: 1, shadow: 1024, bloom: true, smaa: true, aniso: 8, shells: 8, ao: true },
-  ultra: { pixelRatio: 2, shadow: 2048, bloom: true, smaa: true, aniso: 16, shells: 12, ao: true },
+  low: { pixelRatio: 0.6, shadow: 512, bloom: false, smaa: false, aniso: 2, shells: 0, ao: false, dof: false, beams: true, dust: false, probe: 64 },
+  medium: { pixelRatio: 0.8, shadow: 1024, bloom: true, smaa: false, aniso: 4, shells: 5, ao: false, dof: false, beams: true, dust: true, probe: 96 },
+  high: { pixelRatio: 1, shadow: 1024, bloom: true, smaa: true, aniso: 8, shells: 8, ao: true, dof: true, beams: true, dust: true, probe: 128 },
+  ultra: { pixelRatio: 2, shadow: 2048, bloom: true, smaa: true, aniso: 16, shells: 14, ao: true, dof: true, beams: true, dust: true, probe: 192 },
 };
 
 const FinalShader = {
@@ -97,16 +131,20 @@ export class Post {
     const size = renderer.getSize(new THREE.Vector2());
     this.composer = new EffectComposer(renderer);
     this.renderPass = new RenderPass(scene, camera);
-    this.gtao = new GTAOPass(scene, camera, size.x, size.y);
+    this.gtao = new CleanGTAOPass(scene, camera, size.x, size.y);
     this.gtao.updateGtaoMaterial({ radius: 0.45, distanceExponent: 1.5, thickness: 1.2, scale: 1.0, samples: 12 });
     this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, radiusExponent: 1, rings: 2, samples: 12 });
     this.gtao.blendIntensity = 0.9;
+    this.dof = new DOFPass(scene, camera, { focus: 3, aperture: 0.004, maxblur: 0.012 });
+    this.dof.enabled = false;
+    this.dofAllowed = false;
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.55, 0.45, 0.9);
     this.output = new OutputPass();
     this.smaa = new SMAAPass();
     this.final = new ShaderPass(FinalShader);
     this.composer.addPass(this.renderPass);
     this.composer.addPass(this.gtao);
+    this.composer.addPass(this.dof);
     this.composer.addPass(this.bloom);
     this.composer.addPass(this.output);
     this.composer.addPass(this.smaa);
@@ -124,6 +162,14 @@ export class Post {
     this.bloom.enabled = q.bloom;
     this.gtao.enabled = q.ao;
     this.smaa.enabled = q.smaa;
+    this.dofAllowed = q.dof;
+  }
+
+  // Profundidad de campo: solo en planos cinematográficos (menú y galería).
+  setDOF(on, focus = 3, aperture = 0.004) {
+    this.dof.enabled = on && this.dofAllowed;
+    this.dof.uniforms.focus.value = focus;
+    this.dof.uniforms.aperture.value = aperture;
   }
 
   render(dt) {

@@ -1,6 +1,8 @@
 // Sistema de animación procedural de los animatrónicos:
-// poses con servos (velocidad angular limitada), ciclo de caminar/correr, seguimiento
-// de rutas, mirada (cuello + cabeza + ojos), espasmos mecánicos, párpados y mandíbula.
+// servos con muelle subamortiguado (inercia y pequeño rebote mecánico), ciclo de
+// caminar/correr con impacto de talón, pasos al girar, movimiento secundario (cabeza,
+// orejas y mandíbula reaccionan a la aceleración y a cada pisada), mirada con sacadas
+// oculares, espasmos, actuaciones en el escenario, acecho en la puerta, párpados y mandíbula.
 import * as THREE from 'three';
 
 const TAU = Math.PI * 2;
@@ -15,6 +17,26 @@ const wrap = (a) => {
   return a;
 };
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+// Muelle amortiguado 1D para movimiento secundario.
+class Spring {
+  constructor(k = 120, c = 9) {
+    this.k = k;
+    this.c = c;
+    this.x = 0;
+    this.v = 0;
+  }
+  step(target, dt) {
+    const n = Math.max(1, Math.ceil(dt / 0.008));
+    const h = dt / n;
+    for (let i = 0; i < n; i++) {
+      this.v += (this.k * (target - this.x) - this.c * this.v) * h;
+      this.x += this.v * h;
+    }
+    this.x = clamp(this.x, -1.2, 1.2);
+    return this.x;
+  }
+}
 
 export const JOINTS = [
   'hips', 'spine', 'chest', 'neck', 'head', 'jaw',
@@ -128,10 +150,19 @@ export class Animatronic {
     this.props = {};
     this.time = 0;
     this.treadmill = null;
+    this.perform = null;
+    this.turnStep = 0;
+    this.vel = {};
+    this.sec = { headP: new Spring(140, 10), headR: new Spring(140, 10), ear: new Spring(70, 4.5), ear2: new Spring(50, 3), jaw: new Spring(160, 7), body: new Spring(200, 14) };
+    this.lastChest = null;
+    this.lastVel = new THREE.Vector3();
+    this.acc = new THREE.Vector3();
+    this.sacc = { t: 1, yaw: 0, pitch: 0 };
     for (const n of JOINTS) {
       this.cur[n] = new THREE.Vector3();
       this.goal[n] = new THREE.Vector3();
       this.out[n] = new THREE.Vector3();
+      this.vel[n] = new THREE.Vector3();
     }
   }
 
@@ -145,6 +176,7 @@ export class Animatronic {
       this.cur[name] = new THREE.Vector3();
       this.goal[name] = new THREE.Vector3();
       this.out[name] = new THREE.Vector3();
+      this.vel[name] = new THREE.Vector3();
     }
     return o;
   }
@@ -158,7 +190,10 @@ export class Animatronic {
   }
 
   snapPose() {
-    for (const n in this.goal) this.cur[n].copy(this.goal[n]);
+    for (const n in this.goal) {
+      this.cur[n].copy(this.goal[n]);
+      this.vel[n].set(0, 0, 0);
+    }
   }
 
   setHeading(h) {
@@ -173,6 +208,7 @@ export class Animatronic {
 
   place(pos, heading = null) {
     this.root.position.copy(pos);
+    this.lastChest = null;
     this.walk.path = null;
     this.walk.weight = 0;
     this.walk.cur = 0;
@@ -221,15 +257,25 @@ export class Animatronic {
     this.time += dt;
     this.updatePath(dt);
 
-    // Servos: aproximación exponencial con velocidad máxima.
-    const maxStep = this.poseSpeed * dt;
-    const k = Math.min(1, dt * 7);
+    // Servos: muelle subamortiguado con velocidad angular máxima (arranque y frenada con
+    // inercia y un pequeño rebote al llegar, como un motor real).
+    const wN = 2.6 * this.poseSpeed;
+    const zeta = 0.68;
+    const vmax = this.poseSpeed * 1.9;
+    const steps = Math.max(1, Math.ceil((wN * dt) / 0.2));
+    const h = dt / steps;
     for (const n in this.goal) {
       const c = this.cur[n];
       const g = this.goal[n];
-      c.x += clamp((g.x - c.x) * k, -maxStep, maxStep);
-      c.y += clamp((g.y - c.y) * k, -maxStep, maxStep);
-      c.z += clamp((g.z - c.z) * k, -maxStep, maxStep);
+      const v = this.vel[n];
+      for (let i = 0; i < steps; i++) {
+        v.x = clamp(v.x + (wN * wN * (g.x - c.x) - 2 * zeta * wN * v.x) * h, -vmax, vmax);
+        v.y = clamp(v.y + (wN * wN * (g.y - c.y) - 2 * zeta * wN * v.y) * h, -vmax, vmax);
+        v.z = clamp(v.z + (wN * wN * (g.z - c.z) - 2 * zeta * wN * v.z) * h, -vmax, vmax);
+        c.x += v.x * h;
+        c.y += v.y * h;
+        c.z += v.z * h;
+      }
       this.out[n].copy(c);
     }
     const o = this.out;
@@ -249,6 +295,8 @@ export class Animatronic {
 
     this.updateTwitch(dt, o);
     this.updateLook(dt, o);
+    this.updateSecondary(dt, o);
+    this.updateActing(o);
 
     // Temblor (sustos / fallos)
     if (this.shake > 0) {
@@ -348,19 +396,32 @@ export class Animatronic {
     } else {
       W.weight = Math.max(0, W.weight - dt * 3);
       W.cur = 0;
+      let turning = false;
       if (this.faceHeading !== null) {
         const diff = wrap(this.faceHeading - this.heading);
-        const step = 2.2 * dt;
+        const step = 1.9 * dt;
         if (Math.abs(diff) <= step) {
           this.heading = this.faceHeading;
           this.faceHeading = null;
-        } else this.heading = wrap(this.heading + Math.sign(diff) * step);
+        } else {
+          this.heading = wrap(this.heading + Math.sign(diff) * step);
+          turning = Math.abs(diff) > 0.12;
+        }
+      }
+      // Girar en el sitio dando pasitos en vez de deslizarse
+      this.turnStep = turning ? Math.min(1, this.turnStep + dt * 4) : Math.max(0, this.turnStep - dt * 3);
+      if (this.turnStep > 0.01) {
+        W.style = 'walk';
+        W.stride = 0.62;
+        const prev = W.phase;
+        W.phase += dt * 3.4 * this.turnStep;
+        W.weight = Math.max(W.weight, this.turnStep * 0.42);
+        this.checkFootsteps(prev, W.phase);
       }
     }
   }
 
   checkFootsteps(prev, next) {
-    if (!this.onFootstep) return;
     for (const [off, side] of [[Math.PI / 2, 'L'], [(3 * Math.PI) / 2, 'R']]) {
       const a = Math.floor((prev - off) / TAU);
       const b = Math.floor((next - off) / TAU);
@@ -368,7 +429,8 @@ export class Animatronic {
         const foot = this.j['ankle' + side];
         foot.getWorldPosition(tmpV);
         tmpV.y = this.root.position.y;
-        this.onFootstep(this, side, tmpV.clone(), this.walk.style);
+        this.footImpact(this.walk.style);
+        if (this.onFootstep) this.onFootstep(this, side, tmpV.clone(), this.walk.style);
       }
     }
   }
@@ -376,27 +438,139 @@ export class Animatronic {
   applyWalk(o, w, phase, style) {
     const run = style === 'run';
     const A = run
-      ? { hip: 0.78, knee: 1.35, arm: 0.95, bob: 0.07, lean: 0.38, elbow: -1.35 }
-      : { hip: 0.34, knee: 0.72, arm: 0.26, bob: 0.03, lean: 0.05, elbow: -0.22 };
+      ? { hip: 0.8, knee: 1.4, arm: 1.0, bob: 0.075, lean: 0.4, elbow: -1.4 }
+      : { hip: 0.34, knee: 0.74, arm: 0.28, bob: 0.03, lean: 0.06, elbow: -0.24 };
+    let impact = 0;
     for (const side of ['L', 'R']) {
       const ph = phase + (side === 'R' ? Math.PI : 0);
       const sn = Math.sin(ph);
       const cs = Math.cos(ph);
       const hip = -A.hip * sn;
-      const knee = A.knee * Math.pow(Math.max(0, cs), 1.5) + 0.05;
+      // Rodilla: flexión en el balanceo y leve amortiguación al apoyar el talón
+      const knee = A.knee * Math.pow(Math.max(0, cs), 1.5) + 0.05 + Math.pow(Math.max(0, sn), 10) * 0.12;
       o['thigh' + side].x += hip * w;
       o['knee' + side].x += knee * w;
-      o['ankle' + side].x += -(hip + knee) * 0.85 * w;
-      o['shoulder' + side].x += A.arm * sn * w;
-      o['elbow' + side].x += A.elbow * (run ? 1 : 0.6 + 0.4 * Math.max(0, -sn)) * w;
+      // Pie: talón al aterrizar, despegue con la punta
+      o['ankle' + side].x += (-(hip + knee) * 0.85 - Math.pow(Math.max(0, sn), 6) * 0.18 + Math.pow(Math.max(0, -cs), 4) * 0.12 * (run ? 1.6 : 1)) * w;
+      // Brazos con retraso respecto a las piernas (inercia)
+      const sa = Math.sin(ph - 0.35);
+      o['shoulder' + side].x += A.arm * sa * w;
+      o['shoulder' + side].z += (side === 'L' ? 1 : -1) * (run ? 0.12 : 0.04) * w;
+      o['elbow' + side].x += A.elbow * (run ? 1 : 0.55 + 0.45 * Math.max(0, -Math.sin(ph - 0.7))) * w;
+      o['fingers' + side].x += (run ? -0.25 : 0.1) * w;
+      impact = Math.max(impact, Math.pow(Math.max(0, sn), 12));
     }
-    o.hips.z += Math.sin(phase) * 0.04 * w;
+    o.hips.z += Math.sin(phase) * 0.045 * w;
     o.hips.y += Math.sin(phase) * (run ? 0.12 : 0.06) * w;
     o.chest.y -= Math.sin(phase) * (run ? 0.2 : 0.1) * w;
-    o.spine.x += A.lean * w;
-    o.neck.x -= A.lean * 0.5 * w;
-    o.head.x += Math.sin(phase * 2) * 0.025 * w;
-    return A.bob * Math.abs(Math.sin(phase)) * w;
+    o.chest.z -= Math.sin(phase) * 0.03 * w;
+    o.spine.x += (A.lean + impact * 0.035) * w;
+    o.neck.x -= A.lean * 0.45 * w;
+    o.head.x += (Math.sin(phase * 2) * 0.022 - impact * 0.03) * w;
+    if (run) {
+      o.neck.x += 0.12 * w;
+      o.jaw.x += 0.22 * w;
+    }
+    return (A.bob * Math.abs(Math.sin(phase)) + impact * (run ? 0.03 : 0.018)) * w;
+  }
+
+  // Movimiento secundario: la cabeza, las orejas y la mandíbula siguen con retraso a la
+  // aceleración del pecho y rebotan con cada pisada.
+  updateSecondary(dt, o) {
+    if (dt <= 0 || !this.j.chest) return;
+    this.j.chest.getWorldPosition(tmpV);
+    if (this.lastChest) {
+      tmpV2.copy(tmpV).sub(this.lastChest).divideScalar(dt);
+      const ax = (tmpV2.x - this.lastVel.x) / dt;
+      const ay = (tmpV2.y - this.lastVel.y) / dt;
+      const az = (tmpV2.z - this.lastVel.z) / dt;
+      this.lastVel.copy(tmpV2);
+      const k = Math.min(1, dt * 12);
+      this.acc.x += (clamp(ax, -9, 9) - this.acc.x) * k;
+      this.acc.y += (clamp(ay, -9, 9) - this.acc.y) * k;
+      this.acc.z += (clamp(az, -9, 9) - this.acc.z) * k;
+    } else {
+      this.lastChest = new THREE.Vector3();
+      this.lastVel.set(0, 0, 0);
+      this.acc.set(0, 0, 0);
+    }
+    this.lastChest.copy(tmpV);
+    const c = Math.cos(-this.heading);
+    const sn = Math.sin(-this.heading);
+    const fwd = -this.acc.x * sn + this.acc.z * c;
+    const side = this.acc.x * c + this.acc.z * sn;
+    const up = this.acc.y;
+    const S = this.sec;
+    o.head.x += S.headP.step(-fwd * 0.012 + up * 0.006, dt);
+    o.head.z += S.headR.step(side * 0.01, dt);
+    const ear = S.ear.step(fwd * 0.03 + up * 0.025, dt);
+    const ear2 = S.ear2.step(fwd * 0.05 + up * 0.04, dt);
+    if (this.j.earL) {
+      o.earL.x += ear;
+      o.earR.x += ear * 0.9;
+    }
+    if (this.j.ear2L) {
+      o.ear2L.x += ear2;
+      o.ear2R.x += ear2 * 1.1;
+    }
+    o.jaw.x += Math.max(0, S.jaw.step(up * 0.01, dt));
+    const b = S.body.step(0, dt);
+    o.spine.x += b;
+    o.chest.x += b * 0.5;
+  }
+
+  // Impacto de una pisada: pequeña sacudida mecánica.
+  footImpact(style) {
+    const k = style === 'run' ? 1.6 : 1;
+    this.sec.jaw.v += 2.2 * k;
+    this.sec.headP.v += 0.9 * k;
+    this.sec.ear.v -= 2.4 * k;
+    this.sec.ear2.v -= 3.2 * k;
+    this.sec.body.v += 0.5 * k;
+  }
+
+  // Actuaciones en el escenario y comportamiento de acecho en la puerta.
+  updateActing(o) {
+    const t = this.time;
+    const p = this.perform;
+    if (p === 'sing') {
+      const phrase = 0.5 + 0.5 * Math.sin(t * 0.9);
+      o.jaw.x += Math.max(0, Math.sin(t * 7.4)) * 0.3 * phrase;
+      o.head.z += Math.sin(t * 1.6) * 0.07;
+      o.head.x += Math.sin(t * 3.2) * 0.03;
+      o.chest.y += Math.sin(t * 0.8) * 0.06;
+      o.shoulderR.x += Math.sin(t * 1.6) * 0.05;
+      const g = 0.5 + 0.5 * Math.sin(t * 0.8);
+      o.shoulderL.z += g * 0.3;
+      o.elbowL.x -= g * 0.35;
+      o.fingersL.x -= g * 0.3;
+    } else if (p === 'strum') {
+      o.elbowR.x += Math.sin(t * 9) * 0.1;
+      o.wristR.x += Math.sin(t * 9 + 0.6) * 0.22;
+      o.fingersL.x += Math.sin(t * 3) * 0.2;
+      o.head.x += Math.abs(Math.sin(t * 2.1)) * 0.09;
+      o.chest.z += Math.sin(t * 1.05) * 0.04;
+      o.hips.z += Math.sin(t * 1.05) * 0.02;
+    } else if (p === 'sway') {
+      o.hips.z += Math.sin(t * 1.4) * 0.05;
+      o.chest.z -= Math.sin(t * 1.4) * 0.06;
+      o.head.z += Math.sin(t * 1.4 + 0.5) * 0.1;
+      const wv = 0.5 + 0.5 * Math.sin(t * 5.6);
+      o.shoulderR.z -= 0.6 + wv * 0.25;
+      o.shoulderR.x -= 0.3;
+      o.elbowR.x -= 0.9 + wv * 0.3;
+      o.wristR.z += Math.sin(t * 5.6) * 0.3;
+    } else if (p === 'pirate') {
+      o.head.y += Math.sin(t * 0.7) * 0.3;
+      o.shoulderR.x += Math.sin(t * 1.3) * 0.25;
+      o.jaw.x += Math.max(0, Math.sin(t * 2.3)) * 0.3;
+    }
+    if (this.poseName === 'doorway' && !this.moving) {
+      o.head.z += Math.sin(t * 0.35) * 0.14;
+      o.neck.x += Math.sin(t * 0.22) * 0.06;
+      o.spine.x += Math.sin(t * 0.3) * 0.03;
+      o.jaw.x += Math.max(0, Math.sin(t * 0.5) - 0.4) * 0.35;
+    }
   }
 
   updateTwitch(dt, o) {
@@ -472,9 +646,17 @@ export class Animatronic {
     if (this.eyeMat) this.eyeMat.emissiveIntensity = this.eyeGlow;
     if (this.eyeMatHollow) this.eyeMatHollow.emissiveIntensity = this.eyeGlow * 3 + 0.4;
     const L = this.look;
+    const sc = this.sacc;
+    sc.t -= dt;
+    if (sc.t <= 0) {
+      sc.t = 0.8 + Math.random() * 2.8;
+      const calm = Math.random() < 0.4;
+      sc.yaw = calm ? 0 : (Math.random() - 0.5) * 0.5;
+      sc.pitch = calm ? 0 : (Math.random() - 0.5) * 0.22;
+    }
     for (const e of this.eyes) {
-      let yaw = 0;
-      let pitch = 0;
+      let yaw = L.active ? 0 : sc.yaw;
+      let pitch = L.active ? 0 : sc.pitch;
       if (L.active) {
         e.pivot.getWorldPosition(tmpV);
         tmpV2.subVectors(L.target, tmpV);
@@ -483,8 +665,8 @@ export class Animatronic {
         yaw = clamp(Math.atan2(tmpV2.x, tmpV2.z), -0.4, 0.4);
         pitch = clamp(Math.atan2(-tmpV2.y, Math.hypot(tmpV2.x, tmpV2.z)), -0.3, 0.3);
       }
-      e.yaw += (yaw - e.yaw) * Math.min(1, dt * 10);
-      e.pitch += (pitch - e.pitch) * Math.min(1, dt * 10);
+      e.yaw += (yaw - e.yaw) * Math.min(1, dt * 22);
+      e.pitch += (pitch - e.pitch) * Math.min(1, dt * 22);
       e.mesh.rotation.set(e.pitch, e.yaw, 0);
     }
   }

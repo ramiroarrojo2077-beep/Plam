@@ -77,7 +77,7 @@ export class Night {
 
   camSees(room) {
     const c = this.viewedCam();
-    return !!(c && !c.audioOnly && c.rooms.includes(room));
+    return !!(c && c.rooms.includes(room));
   }
 
   usage() {

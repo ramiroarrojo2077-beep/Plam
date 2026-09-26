@@ -6,15 +6,15 @@ en el navegador, sin un solo archivo de imagen, modelo o audio externo.
 
 ## Cómo jugar
 
-**Lo más fácil:** descarga [`cinco-noches.html`](cinco-noches.html) y ábrelo con doble clic en Chrome, Edge o Firefox.
+**Lo más fácil:** descarga [`index.html`](index.html) y ábrelo con doble clic en Chrome, Edge o Firefox.
 Es un único archivo con todo incrustado (código, Three.js y estilos): no necesita npm ni servidor.
 
 Para desarrollar:
 
 ```bash
 npm install
-npm run dev          # abre http://localhost:5173
-npm run build:html   # regenera cinco-noches.html (archivo único)
+npm run dev          # abre http://localhost:5173/dev.html (código fuente con recarga en caliente)
+npm run build:html   # regenera index.html (archivo único)
 ```
 
 `npm run build` genera la versión en varios archivos en `dist/` para cualquier hosting estático.
@@ -27,7 +27,7 @@ npm run build:html   # regenera cinco-noches.html (archivo único)
 | Puerta izquierda / derecha | `Q` / `E`, o clic en el botón rojo de cada panel |
 | Luz izquierda / derecha | `Z` / `C`, o clic en el botón blanco |
 | Subir / bajar el monitor | `S` / `Espacio`, o pasar el ratón por la barra inferior |
-| Cambiar de cámara | clic en el mapa, `1`-`9`, `0`, `-`, o flechas arriba/abajo |
+| Cambiar de cámara | clic en el mapa, `1`-`9`, `0`, o flechas arriba/abajo |
 | Pausa | `Esc` |
 
 En pantallas táctiles aparecen botones de puertas y luces; se gira arrastrando.
@@ -38,7 +38,7 @@ Sobrevive de 12 AM a 6 AM (cada hora dura 60 s por defecto; configurable). Cada 
 monitor consumen energía. Si se acaba, se apaga todo... y Bruno viene a cantarte.
 
 - **Bastián** (conejo) recorre el ala oeste y aparece en la puerta izquierda.
-- **Chiqui** (pollo) pasa por la cocina (solo audio) y los baños, y llega por el ala este.
+- **Chiqui** (pollo) pasa por la cocina (no tiene cámara: solo se la oye) y los baños, y llega por el ala este.
 - **Bruno** (oso) solo se mueve cuando los otros dos han dejado el escenario, evita las cámaras y ataca por la derecha.
 - **Rufo** (zorro) sale de la Cueva Pirata si no lo vigilas y corre por el pasillo oeste: ciérrale la puerta.
 
@@ -61,12 +61,15 @@ los animatrónicos de cerca con todas sus animaciones.
   columna, pecho, cuello, cabeza, mandíbula, hombros, codos, muñecas, dedos con 3 falanges, piernas, orejas,
   párpados). Pelaje con `MeshPhysicalMaterial` (sheen), mapas de normales de fibras, suciedad por vértice y
   endoesqueleto metálico visible (cuello con fuelle, servos en codos y rodillas; Rufo tiene el traje roto).
-- **Animación procedural**: servos con velocidad angular limitada, ciclo de caminar y correr con contacto de pies,
-  mirada coordinada de cuello/cabeza/ojos hacia la cámara que los observa, espasmos mecánicos, parpadeo y
-  mandíbula; susto con embestida y temblor.
-- **Render**: PBR, sombras PCF suaves, ACES, bloom, SMAA y una pasada final con grano, viñeta, aberración
-  cromática y efecto VHS. Las luces se gestionan con un *pool* fijo que se reasigna por vista, para que los shaders
-  no se recompilen al cambiar de cámara.
+- **Animación procedural**: servos con muelle subamortiguado (inercia y pequeño rebote al frenar), ciclo de
+  caminar y correr con impacto de talón y brazos con retraso, pasos al girar en el sitio, movimiento secundario
+  (cabeza, orejas y mandíbula reaccionan a la aceleración y a cada pisada), sacadas oculares, actuaciones en el
+  escenario (Bruno canta, Bastián toca, Chiqui saluda), acecho en la puerta y sustos distintos por personaje.
+- **Render**: PBR con sondas de reflexión capturadas del propio local (reflejos en suelo, ojos y metal, y luz
+  rebotada), niebla, haces de luz volumétricos con polvo en suspensión, manchas, charcos y telarañas, sombras PCF,
+  oclusión ambiental (GTAO), profundidad de campo en el menú y la galería, ACES, bloom, SMAA y una pasada final con
+  grano, viñeta, aberración cromática y efecto VHS. Las luces se gestionan con un *pool* fijo que se reasigna por
+  vista, para que los shaders no se recompilen al cambiar de cámara.
 - **Audio**: todo sintetizado con Web Audio (pasos, portazos, zumbidos, grito, caja de música con la *Marcha del
   Toreador* de Bizet, dominio público). La llamada telefónica usa la síntesis de voz del navegador (desactivable).
 
@@ -75,6 +78,7 @@ los animatrónicos de cerca con todas sus animaciones.
 ```
 src/
   main.js              estados del juego, vistas, entrada, sustos, menú y galería
+dev.html               entrada de desarrollo (index.html es el juego ya compilado en un archivo)
   core/                texturas procedurales, materiales, geometría, audio, post-procesado
   world/               plano, arquitectura, atrezo, oficina, iluminación
   animatronics/        esqueleto/animación (rig.js) y modelado (models.js)

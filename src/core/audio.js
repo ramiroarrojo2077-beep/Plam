@@ -518,6 +518,74 @@ export class AudioEngine {
     }
   }
 
+  // Música del menú: acordes menores lentos con pads desafinados, bajo y caja de música.
+  startMenuMusic() {
+    if (!this.ctx || this.loops.menuMusic) return;
+    const ctx = this.ctx;
+    const bus = ctx.createGain();
+    bus.gain.value = 0;
+    bus.gain.setTargetAtTime(0.9, ctx.currentTime, 1.5);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 900;
+    bus.connect(lp).connect(this.music);
+    const send = this.gain(0.6, this.reverb);
+    bus.connect(send);
+    const hz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+    const chords = [[57, 60, 64], [53, 57, 60], [50, 53, 57], [52, 56, 59]];
+    const bar = 3.4;
+    let i = 0;
+    let stopped = false;
+    const pad = (f, when, dur) => {
+      for (const det of [-7, 6]) {
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.value = f;
+        o.detune.value = det;
+        const g = ctx.createGain();
+        const t0 = ctx.currentTime + when;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.linearRampToValueAtTime(0.022, t0 + 1.1);
+        g.gain.linearRampToValueAtTime(0.0001, t0 + dur + 0.8);
+        o.connect(g).connect(bus);
+        o.start(t0);
+        o.stop(t0 + dur + 1);
+      }
+    };
+    const tick = () => {
+      if (stopped) return;
+      const ch = chords[i % chords.length];
+      for (const m of ch) pad(hz(m), 0.05, bar);
+      this.osc({ freq: hz(ch[0] - 12), dur: bar, gain: 0.05, attack: 0.6, dest: bus, release: 'lin' });
+      if (i % 2 === 1) {
+        const notes = [ch[2] + 24, ch[1] + 24, ch[0] + 24, ch[1] + 24];
+        notes.forEach((m, k) => {
+          const w = 0.3 + k * 0.42 + (Math.random() - 0.5) * 0.04;
+          this.osc({ freq: hz(m), dur: 1.4, gain: 0.05, attack: 0.004, when: w, dest: bus, detune: (Math.random() - 0.5) * 30 });
+          this.osc({ freq: hz(m) * 2.01, dur: 0.5, gain: 0.012, attack: 0.003, when: w, dest: bus });
+        });
+      }
+      i++;
+    };
+    tick();
+    const id = setInterval(tick, bar * 1000);
+    this.loops.menuMusic = {
+      stop: () => {
+        stopped = true;
+        clearInterval(id);
+        bus.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
+      },
+    };
+  }
+
+  // Golpe grave con estática para los sobresaltos del menú.
+  menuJolt() {
+    if (!this.ctx) return;
+    this.osc({ freq: 70, freqEnd: 32, dur: 0.9, gain: 0.35 });
+    this.noise({ type: 'highpass', freq: 900, dur: 0.5, gain: 0.18, curve: 'lin' });
+    for (const f of [155, 164, 233]) this.osc({ type: 'triangle', freq: f, dur: 1.2, gain: 0.05 });
+  }
+
   // Estática continua (pantalla de fin de juego / monitor).
   startStatic(gain = 0.12) {
     if (!this.ctx) return;

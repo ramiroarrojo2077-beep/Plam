@@ -117,7 +117,7 @@ export class Agent {
       return;
     }
     const cam = this.n.viewedCam();
-    if (cam && cam.rooms.includes(this.room) && !cam.audioOnly) {
+    if (cam && cam.rooms.includes(this.room)) {
       this.watchT += dt;
       const late = this.room !== 'STAGE' || this.n.hour >= 2;
       if (late && this.watchT > this.lookDelay) c.lookAt(this.n.camPos, 0.55);
@@ -206,8 +206,7 @@ export class ChickenAI extends Agent {
       this.clangT -= dt;
       if (this.clangT <= 0) {
         this.clangT = 1.2 + Math.random() * 3;
-        const loud = this.n.monitorUp && this.n.cam === '6';
-        this.n.g.audio.clang(this.c.root.position.clone().setY(1.2), loud ? 1.0 : 0.3);
+        this.n.g.audio.clang(this.c.root.position.clone().setY(1.2), 1.0);
         this.c.twitch.list.push({ n: 'shoulderR', axis: 'x', amp: -0.6, t: 0, hold: 0.2 });
       }
     }

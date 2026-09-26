@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Cinco Noches en Bruno's</title>
+  <meta name="description" content="Juego de terror en tiempo real inspirado en Five Nights at Freddy's, hecho con Three.js." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=VT323&family=Special+Elite&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="ui">
+    <!-- Carga -->
+    <section id="loading" class="screen active">
+      <h1 class="title">CINCO NOCHES<br /><span>EN BRUNO'S</span></h1>
+      <div class="bar"><div id="load-fill"></div></div>
+      <p id="load-text">Generando texturas...</p>
+      <button id="load-start" class="hidden">HAZ CLIC PARA ENTRAR</button>
+      <p class="hint">Recomendado: auriculares y habitación a oscuras.</p>
+    </section>
+
+    <!-- Menú principal -->
+    <section id="menu" class="screen">
+      <div class="menu-shade"></div>
+      <div class="menu-left">
+        <p class="menu-kicker">Pizzería Bruno's &middot; turno de noche</p>
+        <h1 class="title glitch">CINCO NOCHES<br /><span>EN BRUNO'S</span></h1>
+        <div id="menu-stars" class="menu-stars" aria-label="Progreso"></div>
+        <nav id="menu-nav">
+          <button data-action="new">Nueva partida</button>
+          <button data-action="continue" id="btn-continue">Continuar <small id="continue-night"></small></button>
+          <button data-action="night6" id="btn-night6">Noche 6 <small class="lock">bloqueada</small></button>
+          <button data-action="custom" id="btn-custom">Noche personalizada <small class="lock">bloqueada</small></button>
+          <button data-action="gallery">Galería</button>
+          <button data-action="options">Opciones</button>
+        </nav>
+      </div>
+      <div class="menu-cam">
+        <div><span class="dot"></span> REC &middot; <span id="menu-cam-id">CAM 1A</span></div>
+        <div id="menu-cam-label">ESCENARIO</div>
+        <div id="menu-cam-time">12:00:00 AM</div>
+      </div>
+      <div class="menu-help">
+        <p><kbd>A</kbd><kbd>D</kbd> mirar &middot; <kbd>Q</kbd><kbd>E</kbd> puertas &middot; <kbd>Z</kbd><kbd>C</kbd> luces</p>
+        <p><kbd>S</kbd> monitor &middot; <kbd>1</kbd>-<kbd>0</kbd> cámaras &middot; <kbd>Esc</kbd> pausa</p>
+      </div>
+      <div class="version">v2.0 &middot; tiempo real</div>
+    </section>
+
+    <!-- Anuncio de periódico (nueva partida) -->
+    <section id="paper" class="screen">
+      <article class="paper">
+        <header>
+          <p class="paper-name">EL DIARIO LOCAL &middot; CLASIFICADOS</p>
+          <h2>SE BUSCA</h2>
+          <p class="paper-sub">Guardia de seguridad nocturno</p>
+        </header>
+        <p>La <b>Pizzería Bruno's</b>, el lugar donde la fantasía y la diversión cobran vida, busca vigilante para el turno de <b>12:00 a 6:00 AM</b>.</p>
+        <p>Funciones: vigilar las cámaras y asegurarse de que no haya daños en el local ni en los animatrónicos.</p>
+        <p class="paper-pay">120,50 &euro; a la semana</p>
+        <p class="paper-small">La empresa no se hace responsable de lesiones ni desmembramientos. Llamar al 555-2026.</p>
+      </article>
+      <p class="paper-skip">Haz clic para continuar</p>
+    </section>
+
+    <!-- Opciones -->
+    <section id="options" class="screen panel-screen">
+      <div class="panel">
+        <h2>Opciones</h2>
+        <label>Calidad gráfica
+          <select id="opt-quality">
+            <option value="low">Baja</option>
+            <option value="medium">Media</option>
+            <option value="high">Alta</option>
+            <option value="ultra">Ultra</option>
+          </select>
+        </label>
+        <label>Volumen <input id="opt-volume" type="range" min="0" max="1" step="0.05" /></label>
+        <label>Sensibilidad de giro <input id="opt-sens" type="range" min="0.4" max="2" step="0.1" /></label>
+        <label>Duración de cada hora
+          <select id="opt-hour">
+            <option value="45">45 s (rápida)</option>
+            <option value="60">60 s (normal)</option>
+            <option value="89">89 s (clásica)</option>
+          </select>
+        </label>
+        <label class="row"><input id="opt-voice" type="checkbox" /> Voz sintetizada en la llamada</label>
+        <label class="row"><input id="opt-edge" type="checkbox" /> Girar al llevar el ratón al borde</label>
+        <div class="panel-actions"><button data-action="back">Volver</button></div>
+      </div>
+    </section>
+
+    <!-- Noche personalizada -->
+    <section id="custom" class="screen panel-screen">
+      <div class="panel">
+        <h2>Noche personalizada</h2>
+        <p class="muted">Nivel de IA de 0 (inactivo) a 20 (implacable).</p>
+        <div class="custom-grid">
+          <label>Bruno (oso) <input type="range" min="0" max="20" value="10" data-ai="bear" /><output>10</output></label>
+          <label>Bastián (conejo) <input type="range" min="0" max="20" value="10" data-ai="bunny" /><output>10</output></label>
+          <label>Chiqui (pollo) <input type="range" min="0" max="20" value="10" data-ai="chicken" /><output>10</output></label>
+          <label>Rufo (zorro) <input type="range" min="0" max="20" value="10" data-ai="fox" /><output>10</output></label>
+        </div>
+        <div class="panel-actions">
+          <button data-action="back">Volver</button>
+          <button data-action="start-custom" class="primary">Empezar</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Galería -->
+    <section id="gallery" class="screen">
+      <div class="gallery-top">
+        <button data-action="back">&larr; Menú</button>
+        <h2 id="gallery-name">Bruno</h2>
+        <div class="gallery-nav">
+          <button data-gal="prev">&lsaquo;</button>
+          <button data-gal="next">&rsaquo;</button>
+        </div>
+      </div>
+      <p id="gallery-desc" class="gallery-desc"></p>
+      <div class="gallery-bottom">
+        <button data-anim="idle" class="on">Reposo</button>
+        <button data-anim="walk">Caminar</button>
+        <button data-anim="run">Correr</button>
+        <button data-anim="stare">Mirar</button>
+        <button data-anim="scare">Susto</button>
+        <button data-anim="hollow">Ojos vacíos</button>
+      </div>
+      <p class="gallery-hint">Arrastra para girar &middot; rueda para acercar</p>
+    </section>
+
+    <!-- Intro de noche -->
+    <section id="intro" class="screen">
+      <div class="intro-text">
+        <div id="intro-time">12:00 AM</div>
+        <div id="intro-night">Noche 1</div>
+      </div>
+    </section>
+
+    <!-- Monitor de cámaras -->
+    <section id="monitor" class="screen">
+      <div class="cam-frame"></div>
+      <div class="cam-rec"><span class="dot"></span> REC</div>
+      <div class="cam-label"><span id="cam-id">CAM 1A</span> <span id="cam-name">Escenario</span></div>
+      <div id="cam-timestamp"></div>
+      <div id="cam-map"></div>
+    </section>
+
+    <!-- HUD en partida -->
+    <section id="hud" class="screen">
+      <div class="hud-tr">
+        <div id="hud-time">12 <small>AM</small></div>
+        <div id="hud-night">Noche 1</div>
+      </div>
+      <div class="hud-bl">
+        <div>Energía restante: <b id="hud-power">100</b>%</div>
+        <div class="usage">Uso: <span id="hud-usage"></span></div>
+      </div>
+      <button id="mute-call" class="hidden">SILENCIAR LLAMADA</button>
+      <div id="subtitles"></div>
+      <div id="monitor-bar" title="Monitor (S / Espacio)"><span>&#9650;&#9650;</span></div>
+      <div id="touch-controls">
+        <button data-touch="doorL">PUERTA</button>
+        <button data-touch="lightL">LUZ</button>
+        <button data-touch="lightR">LUZ</button>
+        <button data-touch="doorR">PUERTA</button>
+      </div>
+    </section>
+
+    <div id="tablet"><div class="tablet-screen"></div></div>
+
+    <!-- Victoria -->
+    <section id="win" class="screen">
+      <div class="win-clock">
+        <div class="roll"><span id="win-5">5</span><span id="win-6">6</span></div>
+        <div class="am">AM</div>
+      </div>
+      <p id="win-msg"></p>
+      <button id="win-continue" class="hidden">Continuar</button>
+    </section>
+
+    <!-- Game over -->
+    <section id="gameover" class="screen">
+      <h1 class="go-title">FIN DEL JUEGO</h1>
+      <p id="go-msg"></p>
+      <div class="go-actions">
+        <button data-action="retry">Reintentar noche</button>
+        <button data-action="menu">Menú principal</button>
+      </div>
+    </section>
+
+    <!-- Pausa -->
+    <section id="pause" class="screen panel-screen">
+      <div class="panel">
+        <h2>Pausa</h2>
+        <div class="panel-actions column">
+          <button data-action="resume" class="primary">Continuar</button>
+          <button data-action="options">Opciones</button>
+          <button data-action="quit">Salir al menú</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="fade"></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

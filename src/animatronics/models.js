@@ -242,14 +242,14 @@ function toothGeo(w, h, d, fang, seed) {
   return g;
 }
 
-function teethRow(parent, M, { count, rx, rz, y, zc, size, pointed = false, arc = 1.05, up = false, big = null, gap = null, seed = 1 }) {
+function teethRow(parent, M, { count, rx, rz, y, zc, size, pointed = false, arc = 1.05, up = false, big = null, gap = null, seed = 1, mat = null, gum = true }) {
   const rootY = y;
   const gumPts = [];
   for (let i = 0; i <= 16; i++) {
     const a = -arc * 1.08 + (2 * arc * 1.08 * i) / 16;
     gumPts.push(new THREE.Vector3(Math.sin(a) * rx * 0.98, rootY + (up ? -0.004 : 0.004), zc + Math.cos(a) * rz * 0.98 - 0.004));
   }
-  add(tube(gumPts, size * 0.32, 32, 8), M.gum, parent, null, null, null, false);
+  if (gum) add(tube(gumPts, size * 0.32, 32, 8), M.gum, parent, null, null, null, false);
   const spacing = (2 * arc * Math.hypot(rx, rz) * 0.5) / Math.max(1, count - 1);
   for (let i = 0; i < count; i++) {
     if (gap && gap.includes(i)) continue;
@@ -263,11 +263,26 @@ function teethRow(parent, M, { count, rx, rz, y, zc, size, pointed = false, arc 
     const h = size * (pointed ? 1.7 : 1.25) * s * (1 - edge * (pointed ? 0.1 : 0.25));
     const d = size * (pointed ? 0.55 : 0.5);
     const geo = toothGeo(w, h, d, pointed, i + seed * 10);
-    const m = add(geo, M.teethV, parent, [Math.sin(a) * rx, rootY + (up ? 1 : -1) * h * 0.42, zc + Math.cos(a) * rz], [0, a, 0], null, false);
+    const m = add(geo, mat || M.teethV, parent, [Math.sin(a) * rx, rootY + (up ? 1 : -1) * h * 0.42, zc + Math.cos(a) * rz], [0, a, 0], null, false);
     m.rotateX((up ? -1 : 1) * 0.12 + (rnd - 0.5) * 0.12);
     m.rotateZ((rnd - 0.5) * 0.16);
     if (up) m.rotateZ(Math.PI);
   }
+}
+
+// Boca del endoesqueleto: segunda fila de dientes metálicos y marco de mandíbula, visible
+// dentro de la boca cuando se abre (el detalle más inquietante de los sustos).
+function endoMouth(head, jaw, M, { rx, rz, y, zc, jy, jzc }) {
+  teethRow(head, M, { count: 7, rx, rz, y: y - 0.004, zc: zc - rz * 0.35, size: 0.022, arc: 0.9, seed: 21, mat: M.metal, gum: false });
+  teethRow(jaw, M, { count: 7, rx: rx * 0.95, rz: rz * 0.95, y: jy + 0.004, zc: jzc, size: 0.02, arc: 0.9, up: true, seed: 22, mat: M.metal, gum: false });
+  const frame = [];
+  for (let i = 0; i <= 12; i++) {
+    const a = -1.0 + (2 * i) / 12;
+    frame.push(new THREE.Vector3(Math.sin(a) * rx * 1.02, y + 0.004, zc - rz * 0.35 + Math.cos(a) * rz * 1.02));
+  }
+  add(tube(frame, 0.008, 24, 6), M.darkMetal, head, null, null, null, false);
+  const jf = frame.map((p) => new THREE.Vector3(p.x * 0.95, jy - 0.004, p.z - (zc - rz * 0.35) + jzc));
+  add(tube(jf, 0.008, 24, 6), M.darkMetal, jaw, null, null, null, false);
 }
 
 function endoRod(parent, M, from, to, r = 0.018, mat = null) {
@@ -386,7 +401,8 @@ function buildFoot(ankle, ctx, color, kind, seed) {
     const z = v.z * 0.25 + (v.z > 0 ? 0.035 * v.z : 0);
     return v.set(x, y * 0.09 - front * front * 0.012, z);
   });
-  add(furGeo(g, color, 0.42, seed), fur, ankle, [0, -0.072, 0.075]);
+  const SOLE = new THREE.Color(0x191410);
+  add(furGeo(g, (p) => color.clone().lerp(SOLE, sstep(-0.035, -0.06, p.y)), 0.42, seed), fur, ankle, [0, -0.072, 0.075]);
   // Dedos
   for (let i = 0; i < 3; i++) {
     const x = (i - 1) * 0.07;
@@ -592,6 +608,29 @@ function mouthInterior(head, jaw, M, pos, size, jawPos, jawSize) {
   add(ellipsoid(jawSize[0], jawSize[1], jawSize[2], 20, 10), M.mouth, jaw, jawPos, null, null, false);
 }
 
+// Colores de la cabeza: sombra en las cuencas (oclusión) y costura trasera.
+function headCol(base, E, r) {
+  const L = V3(E[0], E[1], E[2]);
+  const R = V3(-E[0], E[1], E[2]);
+  const q = new THREE.Vector3();
+  return (p) => {
+    const c = base.clone();
+    const d = Math.min(q.copy(p).distanceTo(L), q.copy(p).distanceTo(R));
+    c.multiplyScalar(1 - 0.5 * gauss(d, r * 1.05, r * 0.45));
+    if (p.z < 0) c.multiplyScalar(1 - 0.4 * sstep(0.012, 0.0, Math.abs(p.x)));
+    return c;
+  };
+}
+// Manchas oscuras rojizas alrededor de la boca (hocico: borde inferior; mandíbula: borde superior).
+const STAIN_MOUTH = new THREE.Color(0x2a0c06);
+function mouthStain(base, edgeY, dir, seed) {
+  return (p) => {
+    const n = simplex.noise3d(p.x * 30 + seed, p.y * 30, p.z * 30) * 0.5 + 0.5;
+    const k = sstep(0.03, 0.0, (p.y - edgeY) * dir) * sstep(-0.02, 0.06, p.z) * (0.35 + n * 0.5);
+    return base.clone().lerp(STAIN_MOUTH, Math.min(0.7, k));
+  };
+}
+
 const eyeDirs = (ex, ey, ez, cy, rx, ry, rz) => [V3(ex / rx, (ey - cy) / ry, ez / rz).normalize(), V3(-ex / rx, (ey - cy) / ry, ez / rz).normalize()];
 
 function bearHead(head, ctx, reg) {
@@ -612,7 +651,7 @@ function bearHead(head, ctx, reg) {
     if (v.y > 0.6) y -= (v.y - 0.6) * 0.06;
     return v.set(x * k, y * k + 0.2, z * k);
   });
-  add(furGeo(hg, cF, 0.3, 21, 7), fur, head);
+  add(furGeo(hg, headCol(cF, E, 0.056), 0.3, 21, 7), fur, head);
   // Hocico superior: grande y dominante, con la base plana donde asientan los dientes
   const mg = sculptSphere(56, 36, (v0) => {
     const v = sq(v0, 0.6, 0.65, 0.6);
@@ -621,7 +660,7 @@ function bearHead(head, ctx, reg) {
     const f = Math.max(0, v.z);
     return v0.set(v.x * (0.17 - f * 0.025), y * 0.105 + f * 0.01, v.z * 0.14 + f * 0.03);
   });
-  add(furGeo(mg, cB, 0.3, 22, 9), fur, head, [0, 0.1, 0.19]);
+  add(furGeo(mg, mouthStain(cB, -0.03, 1, 1), 0.3, 22, 9), fur, head, [0, 0.1, 0.19]);
   add(sculptSphere(28, 18, (v) => v.set(v.x * 0.062 * (v.y > 0 ? 1 : 0.8), v.y * 0.038 + Math.max(0, v.z) * 0.006, v.z * 0.045)), M.noseBlack, head, [0, 0.165, 0.365], [-0.3, 0, 0]);
   // Mandíbula (más estrecha y retrasada que el hocico)
   const jaw = reg.joint('jaw', head, 0, 0.068, 0.09);
@@ -629,10 +668,11 @@ function bearHead(head, ctx, reg) {
     const v = sq(v0, 0.6, 0.7, 0.62);
     return v0.set(v.x * 0.135 * (1 - Math.max(0, -v0.y) * 0.18), Math.min(v.y, 0.25) * 0.066, v.z * 0.135 + Math.max(0, v.z) * 0.01);
   });
-  add(furGeo(jg, cB, 0.32, 23, 9), fur, jaw, [0, -0.018, 0.105]);
+  add(furGeo(jg, mouthStain(cB, 0.015, -1, 2), 0.32, 23, 9), fur, jaw, [0, -0.018, 0.105]);
   mouthInterior(head, jaw, M, [0, 0.055, 0.17], [0.135, 0.05, 0.13], [0, -0.004, 0.11], [0.12, 0.03, 0.12]);
   teethRow(head, M, { count: 9, rx: 0.13, rz: 0.13, y: 0.058, zc: 0.195, size: 0.036, arc: 1.0, seed: 1 });
   teethRow(jaw, M, { count: 9, rx: 0.12, rz: 0.118, y: 0.0, zc: 0.108, size: 0.032, arc: 1.0, up: true, gap: [2], seed: 2 });
+  endoMouth(head, jaw, M, { rx: 0.1, rz: 0.1, y: 0.05, zc: 0.14, jy: 0.0, jzc: 0.07 });
   for (const sx of [1, -1]) {
     addEye(reg, head, sx * E[0], E[1], E[2], 0.056, eyeMat, fur, cF);
     add(new THREE.TorusGeometry(0.068, 0.011, 8, 32, Math.PI * 0.85), M.hatBlack, head, [sx * 0.098, 0.3, 0.255], [0.25, sx * 0.25, Math.PI * 0.08 + (sx > 0 ? 0 : Math.PI * 0.0) + (sx > 0 ? 0.12 : -0.12) + Math.PI * 0.0]);
@@ -677,7 +717,7 @@ function bunnyHead(head, ctx, reg) {
     z += 0.022 * gauss(v.y, 0.28, 0.14) * Math.max(0, v.z) ** 2;
     return v.set(x * k, y * k + 0.21, z * k);
   });
-  add(furGeo(hg, cF, 0.3, 31, 7), fur, head);
+  add(furGeo(hg, headCol(cF, E, 0.058), 0.3, 31, 7), fur, head);
   const mg = sculptSphere(56, 36, (v0) => {
     const v = sq(v0, 0.62, 0.68, 0.62);
     let y = v.y;
@@ -685,17 +725,18 @@ function bunnyHead(head, ctx, reg) {
     const f = Math.max(0, v.z);
     return v0.set(v.x * (0.152 - f * 0.022), y * 0.098 + f * 0.01, v.z * 0.13 + f * 0.028);
   });
-  add(furGeo(mg, cB, 0.3, 32, 9), fur, head, [0, 0.1, 0.18]);
+  add(furGeo(mg, mouthStain(cB, -0.03, 1, 3), 0.3, 32, 9), fur, head, [0, 0.1, 0.18]);
   add(sculptSphere(24, 16, (v) => v.set(v.x * 0.046, v.y * 0.032 + Math.max(0, v.y) * 0.004, v.z * 0.036)), new THREE.MeshPhysicalMaterial({ color: pink, roughness: 0.35, clearcoat: 0.6 }), head, [0, 0.165, 0.335]);
   const jaw = reg.joint('jaw', head, 0, 0.068, 0.085);
   const jg = sculptSphere(44, 28, (v0) => {
     const v = sq(v0, 0.6, 0.7, 0.62);
     return v0.set(v.x * 0.125 * (1 - Math.max(0, -v0.y) * 0.18), Math.min(v.y, 0.25) * 0.062, v.z * 0.125 + Math.max(0, v.z) * 0.01);
   });
-  add(furGeo(jg, cB, 0.3, 33, 9), fur, jaw, [0, -0.018, 0.1]);
+  add(furGeo(jg, mouthStain(cB, 0.015, -1, 4), 0.3, 33, 9), fur, jaw, [0, -0.018, 0.1]);
   mouthInterior(head, jaw, M, [0, 0.052, 0.16], [0.12, 0.048, 0.12], [0, -0.004, 0.1], [0.11, 0.028, 0.11]);
   teethRow(head, M, { count: 8, rx: 0.117, rz: 0.122, y: 0.058, zc: 0.185, size: 0.034, arc: 0.95, big: [3, 4], seed: 3 });
   teethRow(jaw, M, { count: 8, rx: 0.11, rz: 0.108, y: 0.0, zc: 0.103, size: 0.03, arc: 0.95, up: true, seed: 4 });
+  endoMouth(head, jaw, M, { rx: 0.09, rz: 0.09, y: 0.05, zc: 0.13, jy: 0.0, jzc: 0.065 });
   for (const sx of [1, -1]) {
     addEye(reg, head, sx * E[0], E[1], E[2], 0.058, eyeMat, fur, cF);
     const s = sx > 0 ? 'L' : 'R';
@@ -731,7 +772,7 @@ function chickenHead(head, ctx, reg) {
     z += 0.02 * gauss(v.y, 0.3, 0.15) * Math.max(0, v.z) ** 2;
     return v.set(x * k, y * k + 0.21, z * k);
   });
-  add(furGeo(hg, cF, 0.28, 41, 7), fur, head);
+  add(furGeo(hg, headCol(cF, E, 0.057), 0.28, 41, 7), fur, head);
   // Pico superior con caballete y punta hacia abajo
   const beakU = sculptSphere(56, 32, (v0) => {
     const v = sq(v0, 0.72, 0.8, 0.8);
@@ -752,6 +793,7 @@ function chickenHead(head, ctx, reg) {
   mouthInterior(head, jaw, M, [0, 0.1, 0.17], [0.105, 0.042, 0.12], [0, -0.014, 0.1], [0.1, 0.02, 0.12]);
   teethRow(head, M, { count: 9, rx: 0.102, rz: 0.125, y: 0.1, zc: 0.17, size: 0.026, arc: 1.0, seed: 5 });
   teethRow(jaw, M, { count: 9, rx: 0.096, rz: 0.118, y: -0.014, zc: 0.085, size: 0.024, arc: 1.0, up: true, seed: 6 });
+  endoMouth(head, jaw, M, { rx: 0.08, rz: 0.09, y: 0.095, zc: 0.12, jy: -0.014, jzc: 0.05 });
   for (const sx of [1, -1]) {
     addEye(reg, head, sx * E[0], E[1], E[2], 0.057, eyeMat, fur, cF);
     add(new THREE.TorusGeometry(0.062, 0.009, 8, 30, Math.PI * 0.8), M.hatBlack, head, [sx * 0.1, 0.33, 0.232], [0.3, sx * 0.3, Math.PI * 0.1 + (sx > 0 ? 0.25 : -0.25)]);
@@ -782,7 +824,7 @@ function foxHead(head, ctx, reg) {
     z += 0.022 * gauss(v.y, 0.3, 0.13) * Math.max(0, v.z) ** 2;
     return v.set(x * k, y * k + 0.21, z * k);
   });
-  add(furGeo(hg, cF, 0.36, 51, 7), fur, head);
+  add(furGeo(hg, headCol(cF, E, 0.053), 0.36, 51, 7), fur, head);
   // Hocico alargado bicolor
   const snoutCol = (p) => cF.clone().lerp(cB, sstep(0.0, -0.03, p.y));
   const sg = sculptSphere(56, 34, (v0) => {
@@ -800,7 +842,7 @@ function foxHead(head, ctx, reg) {
     const f = Math.max(0, v.z);
     return v0.set(v.x * 0.096 * (1 - f * 0.32), Math.min(v.y, 0.25) * 0.05, v.z * 0.19);
   });
-  add(furGeo(jg, cB, 0.36, 53, 9), fur, jaw, [0, -0.012, 0.15]);
+  add(furGeo(jg, mouthStain(cB, 0.012, -1, 5), 0.36, 53, 9), fur, jaw, [0, -0.012, 0.15]);
   mouthInterior(head, jaw, M, [0, 0.085, 0.2], [0.09, 0.045, 0.17], [0, -0.002, 0.15], [0.085, 0.02, 0.16]);
   teethRow(head, M, { count: 10, rx: 0.085, rz: 0.17, y: 0.078, zc: 0.2, size: 0.03, arc: 0.85, pointed: true, big: [1, 8], seed: 7 });
   teethRow(jaw, M, { count: 10, rx: 0.08, rz: 0.16, y: -0.004, zc: 0.14, size: 0.028, arc: 0.85, pointed: true, up: true, gap: [6], big: [1, 8], seed: 8 });
@@ -935,7 +977,7 @@ export function createAnimatronic(kind, M, T) {
   const fur = furMaterial(T, cfg.sheen, 3);
   const eyeTex = genEye(cfg.eye);
   const hollowTex = genEye(cfg.eye, true);
-  const eyeMat = new THREE.MeshPhysicalMaterial({ map: eyeTex.map, emissiveMap: eyeTex.emissive, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.08, clearcoat: 1, clearcoatRoughness: 0.05 });
+  const eyeMat = new THREE.MeshPhysicalMaterial({ map: eyeTex.map, emissiveMap: eyeTex.emissive, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.4, ior: 1.38 });
   const eyeMatHollow = new THREE.MeshPhysicalMaterial({ map: hollowTex.map, emissiveMap: hollowTex.emissive, emissive: 0xffffff, emissiveIntensity: 1.5, roughness: 0.1, clearcoat: 1 });
   A.eyeMat = eyeMat;
   A.eyeMatHollow = eyeMatHollow;

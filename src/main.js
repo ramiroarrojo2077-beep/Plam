@@ -9,6 +9,8 @@ import { buildBuilding } from './world/building.js';
 import { buildProps } from './world/props.js';
 import { buildOffice } from './world/office.js';
 import { LightRig } from './world/lights.js';
+import { captureProbes, CAM_PROBE } from './world/probes.js';
+import { Atmosphere } from './world/atmosphere.js';
 import { CAMS, PLAYER_EYE, VIEW_LIGHTS, spotFor } from './world/layout.js';
 import { createAnimatronic, buildSpareParts, CHARACTERS } from './animatronics/models.js';
 import { setFurShells } from './animatronics/fur.js';
@@ -54,6 +56,7 @@ class Game {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000000);
+    this.scene.fog = new THREE.FogExp2(0x07080b, 0.02);
     this.camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.04, 90);
     this.camera.rotation.order = 'YXZ';
     this.post = new Post(this.renderer, this.scene, this.camera);
@@ -67,6 +70,13 @@ class Game {
     this.night = null;
     this.monitorAnim = null;
     this.menu = { idx: 0, t: 0 };
+    this.menuShots = [
+      { kind: 'face', who: 'bear', dur: 7.5, cam: 'CAM 1A', label: 'ESCENARIO · BRUNO', side: -1 },
+      { kind: 'face', who: 'bunny', dur: 7, cam: 'CAM 1A', label: 'ESCENARIO · BASTIÁN', side: 1 },
+      { kind: 'wide', dur: 7.5, cam: 'CAM 1B', label: 'COMEDOR' },
+      { kind: 'face', who: 'chicken', dur: 7, cam: 'CAM 1A', label: 'ESCENARIO · CHIQUI', side: -1 },
+      { kind: 'cove', dur: 6.5, cam: 'CAM 1C', label: 'CUEVA PIRATA · RUFO' },
+    ];
     this.gallery = { idx: 0, yaw: 0.3, pitch: 0.1, dist: 4.3, mode: 'idle', auto: true };
     this.raycaster = new THREE.Raycaster();
     this.lastT = performance.now();
@@ -129,7 +139,8 @@ class Game {
     this.ui.setLoading(steps.length / (steps.length + 6), 'Iluminación...');
     await nextFrame();
     const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.fallbackEnv = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environment = this.fallbackEnv;
     this.scene.environmentIntensity = 0.1;
     this.rig = new LightRig(this.scene, q.shadow);
 
@@ -140,6 +151,11 @@ class Game {
     const office = buildOffice(this.scene, M, T, this.rig);
     const spare = buildSpareParts(this.scene, M, T);
     this.world = { building, props, office, spare, cove: props.cove, camModels: building.camModels };
+    this.atmo = new Atmosphere(this.scene, this.rig);
+
+    this.ui.setLoading((steps.length + 1.5) / (steps.length + 6), 'Capturando reflejos del local...');
+    await nextFrame();
+    this.probes = captureProbes(this.renderer, this.scene, this.rig, [this.atmo.group], q.probe || 128);
 
     this.chars = {};
     for (let i = 0; i < KINDS.length; i++) {
@@ -187,6 +203,7 @@ class Game {
     this.post.setQuality(q);
     this.rig.setShadowSize(q.shadow);
     if (this.chars) for (const c of Object.values(this.chars)) setFurShells(c.root, [c.fur, c.furDouble].filter(Boolean), this.T.furStrands, q.shells);
+    if (this.atmo) this.atmo.setQuality(q);
     if (resize) this.resize();
   }
 
@@ -229,6 +246,13 @@ class Game {
       if (cams[camId]) cams[camId].group.visible = false;
     }
     this.post.u.camMode.value = view === 'camera' ? 1 : 0;
+    // Entorno local (reflejos y luz rebotada), niebla y exposición por zona
+    const probe = view === 'camera' ? CAM_PROBE[camId] : view === 'menu' || view === 'gallery' ? 'stage' : 'office';
+    this.scene.environment = this.probes?.[probe] || this.fallbackEnv;
+    this.envTarget = this.probes ? { office: 1.0, jumpscare: 0.8, camera: 0.9, menu: 0.6, gallery: 0.8 }[view] : 0.1;
+    this.scene.fog.density = { office: 0.016, jumpscare: 0.01, camera: 0.02, menu: 0.018, gallery: 0.014 }[view];
+    this.renderer.toneMappingExposure = { office: 1.0, jumpscare: 1.0, camera: 1.12, menu: 1.2, gallery: 1.05 }[view];
+    if (view !== 'menu' && view !== 'gallery') this.post.setDOF(false);
   }
 
   // ================================================================ estados
@@ -255,6 +279,7 @@ class Game {
     put('bunny', 'STAGE', 'guitar');
     put('chicken', 'STAGE', 'cupcake');
     put('fox', 'COVE', 'coveHunch');
+    for (const k of KINDS) c[k].perform = null;
     this.world.cove.setOpen(0);
   }
 
@@ -282,14 +307,37 @@ class Game {
     this.stopNight();
     this.state = 'menu';
     this.audio.stopAll();
-    this.audio.startStatic(0.025);
+    this.audio.startStatic(0.018);
+    this.audio.startMenuMusic();
     this.ui.only('menu');
+    this.menuSel = -1;
     this.ui.menuState(this.save);
     this.ui.fade(false);
     this.placeOnStage();
-    this.setView('menu');
+    this.chars.bear.perform = 'sing';
+    this.chars.bunny.perform = 'strum';
+    this.chars.chicken.perform = 'sway';
     this.menu.t = 0;
+    this.menu.idx = 0;
+    this.setView('menu');
+    this.setMenuShot(0);
     this.fx.static = 1;
+  }
+
+  // Anuncio de periódico antes de la primera noche.
+  showPaper() {
+    this.state = 'paper';
+    this.audio.stopAll();
+    this.audio.startStatic(0.01);
+    this.ui.only('paper');
+    this.fx.fade = 1;
+    const go = () => {
+      clearTimeout(this.paperT);
+      document.getElementById('paper').onclick = null;
+      if (this.state === 'paper') this.startNight(1);
+    };
+    this.paperT = setTimeout(go, 9000);
+    document.getElementById('paper').onclick = go;
   }
 
   stopNight() {
@@ -349,7 +397,14 @@ class Game {
         msg = 'Sobreviviste a la noche 6. Pocos llegan hasta aquí.';
       }
       saveJSON('cn-save', this.save);
-    } else msg = 'Sobreviviste a la noche personalizada.';
+    } else {
+      msg = 'Sobreviviste a la noche personalizada.';
+      if (Object.values(this.nightCustom || {}).every((v) => v >= 20)) {
+        this.save.beatMax = true;
+        saveJSON('cn-save', this.save);
+        msg = '20/20/20/20. Leyenda del turno de noche.';
+      }
+    }
     this.ui.win(msg);
     setTimeout(() => {
       if (this.state !== 'win') return;
@@ -382,7 +437,9 @@ class Game {
     char.twitch.rate = 0;
     char.lookAt(EYE, 30);
     const yawTo = side === 'L' ? 0.85 : side === 'R' ? -0.85 : 0;
-    this.js = { t: 0, char, yawFrom: this.yaw, yawTo, headOff: null };
+    char.perform = null;
+    const prof = { fox: { from: 3.6, dur: 0.34, hop: 0.24 }, bear: { from: 1.6, dur: 0.4, hop: 0 }, bunny: { from: 1.8, dur: 0.2, hop: 0 }, chicken: { from: 1.8, dur: 0.24, hop: 0 } }[char.id];
+    this.js = { t: 0, char, yawFrom: this.yaw, yawTo, headOff: null, prof, snapped: false };
     this.audio.stopAmbient();
     this.audio.scream();
   }
@@ -487,8 +544,10 @@ class Game {
     c.lidExtra = 0;
     c.twitch.rate = 0.3;
     c.eyeGlowTarget = 0.5;
+    c.perform = null;
     if (mode === 'idle') {
       c.setPose({ bear: 'stageBear', bunny: 'guitar', chicken: 'cupcake', fox: 'coveHunch' }[c.id], 2);
+      c.perform = { bear: 'sing', bunny: 'strum', chicken: 'sway', fox: 'pirate' }[c.id];
       c.lookAt(null);
     } else if (mode === 'walk' || mode === 'run') {
       c.setPose('stand', 3);
@@ -527,7 +586,7 @@ class Game {
           case 'new':
             this.save.night = 1;
             saveJSON('cn-save', this.save);
-            this.startNight(1);
+            this.showPaper();
             break;
           case 'continue':
             this.startNight(Math.min(this.save.night, 5));
@@ -675,13 +734,26 @@ class Game {
 
   bindInput() {
     const inp = this.input;
-    const keyCams = ['1A', '1B', '1C', '2A', '2B', '3', '4A', '4B', '5', '6', '7'];
+    const keyCams = ['1A', '1B', '1C', '2A', '2B', '3', '4A', '4B', '5', '7'];
     window.addEventListener('keydown', (e) => {
       inp.keys[e.code] = true;
       if (e.repeat) return;
       if (e.code === 'Escape') {
         if (this.state === 'night' || this.state === 'paused') this.togglePause();
         else if (this.state === 'gallery') this.enterMenu();
+        return;
+      }
+      if (this.state === 'menu' && this.ui.isShown('menu') && ['ArrowUp', 'ArrowDown', 'KeyW', 'KeyS', 'Enter'].includes(e.code)) {
+        const btns = [...document.querySelectorAll('#menu-nav button')].filter((b) => !b.disabled);
+        if (e.code === 'Enter') {
+          if (btns[this.menuSel]) btns[this.menuSel].click();
+        } else {
+          const d = e.code === 'ArrowUp' || e.code === 'KeyW' ? -1 : 1;
+          this.menuSel = (Math.max(-1, this.menuSel) + d + btns.length) % btns.length;
+          btns.forEach((b, i) => b.classList.toggle('sel', i === this.menuSel));
+          this.audio.click();
+        }
+        e.preventDefault();
         return;
       }
       if (this.state !== 'night') return;
@@ -709,7 +781,7 @@ class Game {
             const d = +m[1];
             const id = keyCams[d === 0 ? 9 : d - 1];
             if (id) this.selectCam(id);
-          } else if (e.code === 'Minus' && n.monitorUp) this.selectCam('7');
+          }
         }
       }
     });
@@ -790,6 +862,9 @@ class Game {
         case 'preload':
           this.updateMenu(dt);
           break;
+        case 'paper':
+          this.fx.fade = 1;
+          break;
         case 'gallery':
           this.updateGallery(dt);
           break;
@@ -820,6 +895,10 @@ class Game {
       this.world.cove.update(dt, t);
       for (const c of Object.values(this.chars)) if (c.root.visible) c.update(dt, t);
       this.rig.update(t);
+      this.atmo.update(t);
+      const dark = this.night && !this.night.state.power;
+      const envT = dark ? 0.03 : this.envTarget ?? 0.1;
+      this.scene.environmentIntensity += (envT - this.scene.environmentIntensity) * Math.min(1, dt * 3);
       const blink = Math.floor(t * 1.2) % 2 === 0;
       for (const id in this.world.camModels) this.world.camModels[id].led.emissiveIntensity = blink && this.rig.state.power ? 4 : 0.2;
       if (this.audio.ctx) {
@@ -833,7 +912,6 @@ class Game {
     let stat = fx.static;
     if (this.night && this.night.monitorUp) {
       stat = Math.max(stat, 0.12 + this.night.camStatic * 0.6);
-      if (CAM_BY_ID[this.night.cam].audioOnly) stat = 0.35;
     }
     u.staticAmt.value = clamp(stat, 0, 1);
     u.glitch.value = fx.glitch;
@@ -932,8 +1010,18 @@ class Game {
     const k = Math.min(1, J.t / 0.14);
     this.yaw = J.yawFrom + (J.yawTo - J.yawFrom) * (1 - Math.pow(1 - k, 3));
     const f = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    const lunge = Math.min(1, J.t / 0.2);
-    const dist = 1.7 - (1.7 - 0.6) * (1 - Math.pow(1 - lunge, 2));
+    const P = J.prof;
+    const lunge = Math.min(1, J.t / P.dur);
+    const dist = P.from - (P.from - 0.6) * (1 - Math.pow(1 - lunge, 2));
+    c.treadmill = c.id === 'fox' && lunge < 1 ? 'run' : null;
+    if (!J.snapped && J.t > 0.55) {
+      // Latigazo de cabeza a mitad del grito
+      J.snapped = true;
+      c.sec.headR.v += (Math.random() < 0.5 ? -1 : 1) * 7;
+      c.sec.headP.v -= 4;
+      c.sec.jaw.v += 5;
+      this.fx.flash = 0.12;
+    }
     const s = c.body.scale.x;
     if (J.headOff === null) {
       c.root.position.set(0, 0, 0);
@@ -941,48 +1029,138 @@ class Game {
       c.root.updateMatrixWorld(true);
       J.headOff = c.j.head.getWorldPosition(new THREE.Vector3()).y + 0.2 * s;
     }
-    c.root.position.set(EYE.x + f.x * dist, EYE.y - J.headOff + 0.02, EYE.z + f.z * dist);
+    c.root.position.set(EYE.x + f.x * dist, EYE.y - J.headOff + 0.02 + P.hop * Math.sin(Math.PI * lunge), EYE.z + f.z * dist);
     c.heading = this.yaw;
     c.root.rotation.y = this.yaw;
     const shake = Math.max(0, 1 - J.t / 1.3);
     this.camera.position.copy(EYE);
     this.camera.rotation.set(-0.02 + (Math.random() - 0.5) * 0.05 * shake, this.yaw + (Math.random() - 0.5) * 0.06 * shake, (Math.random() - 0.5) * 0.04 * shake);
-    this.setFovH(96);
+    this.setFovH(96 - Math.sin(Math.min(1, J.t / 0.3) * Math.PI) * 10 + (J.snapped ? Math.max(0, 1 - (J.t - 0.55) * 4) * 8 : 0));
     this.rig.movePoint('scare', new THREE.Vector3(EYE.x - f.z * 0.6, EYE.y + 0.9, EYE.z + f.x * 0.6));
     this.fx.glitch = 0.25 + J.t * 0.5;
     if (J.t > 1.05) this.fx.static = Math.min(1, (J.t - 1.05) * 3);
     if (J.t > 1.4) this.gameOver();
   }
 
+  // Planos del menú: primeros planos de cada animatrónico actuando, plano general del
+  // escenario y Rufo asomándose por el telón. Cada plano dura unos segundos y se corta con estática.
+  setMenuShot(i) {
+    const SHOTS = this.menuShots;
+    const M = this.menu;
+    M.idx = (i + SHOTS.length) % SHOTS.length;
+    M.t = 0;
+    M.jolt = Math.random() < 0.55 ? 2.5 + Math.random() * 3 : -1;
+    M.joltT = 0;
+    const shot = SHOTS[M.idx];
+    for (const k of KINDS) this.chars[k].setHollow(false);
+    const fox = this.chars.fox;
+    if (shot.kind === 'cove') {
+      this.world.cove.setOpen(0.34);
+      const base = wp('cv');
+      fox.place(base.clone().add(new THREE.Vector3(1.55, 0, 0.3)), 1.45);
+      fox.setPose('coveHunch');
+      fox.snapPose();
+      fox.perform = null;
+      fox.eyeGlowTarget = 1.4;
+      this.rig.setView(['menuKey', 'coveSpot', 'coveGlow', 'dining2', 'signGlow'], 0.03);
+      if (this.probes) this.scene.environment = this.probes.cove;
+    } else {
+      this.world.cove.setOpen(0);
+      const [id, face] = spotFor('COVE', 'fox');
+      const p = wp(id);
+      fox.place(p, Math.atan2(face[0] - p.x, face[1] - p.z));
+      fox.setPose('coveHunch');
+      fox.snapPose();
+      this.rig.setView(VIEW_LIGHTS.menu, 0.03);
+      if (this.probes) this.scene.environment = shot.kind === 'wide' ? this.probes.dining : this.probes.stage;
+    }
+    this.ui.menuCam(shot.cam, shot.label, '');
+  }
+
   updateMenu(dt) {
     const M = this.menu;
     M.t += dt;
-    const order = ['bear', 'bunny', 'chicken'];
-    if (M.t > 6.5) {
-      M.t = 0;
-      M.idx = (M.idx + 1) % order.length;
+    const shot = this.menuShots[M.idx];
+    if (M.t > shot.dur) {
+      this.setMenuShot(M.idx + 1);
       this.fx.static = 1;
       this.fx.glitch = 0.6;
-      if (this.audio.ctx) this.audio.staticBurst(0.35, 0.08);
+      if (this.audio.ctx) this.audio.staticBurst(0.35, 0.07);
+      return;
     }
-    const c = this.chars[order[M.idx]];
-    const head = c.j.head.getWorldPosition(new THREE.Vector3());
-    head.y += 0.17 * c.body.scale.x;
     const t = this.time;
-    const drift = M.t / 6.5;
-    const off = new THREE.Vector3(0.35 * Math.sin(t * 0.13) + (M.idx - 1) * -0.2, -0.28 + drift * 0.08, 1.35 - drift * 0.25);
-    this.camera.position.copy(head).add(off);
-    this.camera.lookAt(head.x, head.y - 0.03, head.z);
-    this.camera.fov = 38;
-    this.camera.updateProjectionMatrix();
-    this.rig.movePoint('menuKey', new THREE.Vector3(head.x + 0.9, head.y - 1.1, head.z + 1.8), head);
-    for (const k of order) {
-      const ch = this.chars[k];
-      ch.twitch.rate = 0.5;
-      if (k === order[M.idx] && M.t > 2.5) ch.lookAt(this.camera.position, 0.6);
-      else ch.lookAt(null);
+    const drift = M.t / shot.dur;
+    const cam = this.camera;
+    let focus = 3;
+    let aperture = 0.005;
+    const order = ['bear', 'bunny', 'chicken'];
+    if (shot.kind === 'face') {
+      const c = this.chars[shot.who];
+      const head = c.j.head.getWorldPosition(new THREE.Vector3());
+      head.y += 0.17 * c.body.scale.x;
+      const ang = shot.side * (0.42 - drift * 0.3) + Math.sin(t * 0.21) * 0.04;
+      const dist = 1.45 - drift * 0.28;
+      cam.position.set(head.x + Math.sin(ang) * dist, head.y - 0.2 + drift * 0.06, head.z + Math.cos(ang) * dist);
+      cam.lookAt(head.x, head.y - 0.04, head.z);
+      cam.fov = 32;
+      focus = dist;
+      aperture = 0.007;
+      this.rig.movePoint('menuKey', new THREE.Vector3(head.x - shot.side * 0.45, head.y - 0.55, head.z + 1.6), head);
+      // Sobresalto: gira la cabeza de golpe hacia la cámara con los ojos vacíos
+      for (const k of order) {
+        const ch = this.chars[k];
+        ch.twitch.rate = 0.4;
+        if (k !== shot.who) ch.lookAt(null);
+      }
+      if (M.jolt > 0 && M.t > M.jolt && M.joltT === 0) {
+        M.joltT = 1.1;
+        c.lookAt(cam.position, 14);
+        c.setHollow(true);
+        c.eyeGlowTarget = 1.8;
+        c.perform = null;
+        c.jaw.target = 0.5;
+        this.fx.glitch = 1;
+        this.fx.static = 0.5;
+        if (this.audio.ctx) this.audio.menuJolt();
+      }
+      if (M.joltT > 0) {
+        M.joltT -= dt;
+        if (M.joltT <= 0) {
+          M.joltT = -1;
+          c.setHollow(false);
+          c.eyeGlowTarget = 0.4;
+          c.jaw.target = 0;
+          c.perform = { bear: 'sing', bunny: 'strum', chicken: 'sway' }[c.id];
+          this.fx.static = 0.7;
+        }
+      } else if (M.joltT === 0) c.lookAt(M.t > 3 ? cam.position : null, 0.5);
+    } else if (shot.kind === 'wide') {
+      const z = -21.8 - drift * 2.2;
+      cam.position.set(-2.2 + drift * 2.6, 2.3 - drift * 0.15, z);
+      cam.lookAt(0.3 - drift * 0.5, 1.9, -34.5);
+      cam.fov = 44;
+      focus = Math.abs(z + 34.5);
+      aperture = 0.0022;
+      this.rig.movePoint('menuKey', new THREE.Vector3(0, 1.4, -30.5), new THREE.Vector3(0, 2.3, -34.8));
+      for (const k of order) this.chars[k].lookAt(M.t > 4.5 ? cam.position : null, 0.4);
+    } else if (shot.kind === 'cove') {
+      const fox = this.chars.fox;
+      const head = fox.j.head.getWorldPosition(new THREE.Vector3());
+      cam.position.set(-7.9 + drift * 0.5, 1.75 + drift * 0.08, -24.35 - drift * 0.25);
+      cam.lookAt(head.x, head.y, head.z);
+      cam.fov = 36;
+      focus = cam.position.distanceTo(head);
+      aperture = 0.006;
+      this.rig.movePoint('menuKey', new THREE.Vector3(-9.2, 0.6, -23.2), head);
+      fox.lookAt(M.t > 1.5 ? cam.position : null, 0.8);
+      this.world.cove.setOpen(0.34 + Math.sin(t * 0.8) * 0.03);
     }
-    if (Math.random() < dt * 0.25) this.fx.glitch = 0.5;
+    cam.updateProjectionMatrix();
+    this.post.setDOF(true, focus, aperture);
+    if (Math.random() < dt * 0.2) this.fx.glitch = Math.max(this.fx.glitch, 0.4);
+    const secs = Math.floor(t) % 60;
+    const mins = Math.floor(t / 60) % 60;
+    this.ui.menuCam(shot.cam, shot.label, `12:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')} AM`);
   }
 
   updateGallery(dt) {
@@ -996,6 +1174,7 @@ class Game {
     this.camera.position.set(center.x + Math.sin(G.yaw) * Math.cos(G.pitch) * d, center.y + Math.sin(G.pitch) * d, center.z + Math.cos(G.yaw) * Math.cos(G.pitch) * d);
     this.camera.lookAt(center);
     this.setFovH(70);
+    this.post.setDOF(true, d, 0.0022);
     if (G.mode === 'stare' || G.mode === 'idle') c.lookAt(this.camera.position, G.mode === 'stare' ? 1.2 : 0.5);
   }
 }

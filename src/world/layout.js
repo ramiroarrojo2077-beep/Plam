@@ -116,7 +116,6 @@ export const CAMS = [
   { id: '4A', name: 'Pasillo este', pos: [5.95, 2.78, -5.6], look: [5.0, 0.9, -20.5], fov: 58, pan: 0.0, rooms: ['EAST_HALL'], lights: ['eh1', 'eh2', 'ehC'], map: [5, -13] },
   { id: '4B', name: 'Esquina este', pos: [3.98, 2.78, 2.3], look: [5.3, 0.9, -4.6], fov: 60, pan: 0.08, rooms: ['EAST_CORNER'], lights: ['ehC', 'eh2', 'doorR'], map: [5, -3.5] },
   { id: '5', name: 'Tras bastidores', pos: [-11.6, 3.0, -36.6], look: [-14.8, 1.0, -32.2], fov: 64, pan: 0.12, rooms: ['BACKSTAGE'], lights: ['bsBulb'], map: [-14, -33.5] },
-  { id: '6', name: 'Cocina', audioOnly: true, pos: [11.6, 3.0, -21.4], look: [15, 1, -26], fov: 60, pan: 0, rooms: ['KITCHEN'], lights: ['kitchen'], map: [14, -24.5] },
   { id: '7', name: 'Baños', pos: [11.6, 3.0, -30.4], look: [15.6, 0.9, -35.2], fov: 64, pan: 0.12, rooms: ['RESTROOMS'], lights: ['restroom'], map: [14, -33.5] },
 ];
 
@@ -124,11 +123,11 @@ export const CAMS = [
 // de luces reales (así nunca cambia el número de luces y no se recompilan shaders).
 export const LIGHTS = {
   // Oficina
-  officeLamp: { type: 'point', pos: [0, 2.45, -0.4], color: 0xffd9a0, intensity: 3.2, distance: 9, flicker: 'bulb' },
+  officeLamp: { type: 'point', pos: [0, 2.45, -0.4], color: 0xffd9a0, intensity: 4.4, distance: 9, flicker: 'bulb' },
   deskLamp: { type: 'spot', pos: [1.18, 1.3, -1.95], target: [0.5, 0.75, -1.55], angle: 0.85, penumbra: 0.7, color: 0xffcf8a, intensity: 7, distance: 5, shadow: true },
   monitorGlow: { type: 'point', pos: [-0.1, 1.15, -1.35], color: 0x86b4ff, intensity: 0.9, distance: 3.5, flicker: 'screen' },
-  doorL: { type: 'spot', pos: [-5.6, 2.9, -0.2], target: [-4.5, 0.9, -1.3], angle: 0.72, penumbra: 0.45, color: 0xfff1d0, intensity: 40, distance: 9, shadow: true, toggle: 'lightL', flicker: 'buzz' },
-  doorR: { type: 'spot', pos: [5.6, 2.9, -0.2], target: [4.5, 0.9, -1.3], angle: 0.72, penumbra: 0.45, color: 0xfff1d0, intensity: 40, distance: 9, shadow: true, toggle: 'lightR', flicker: 'buzz' },
+  doorL: { type: 'spot', pos: [-5.6, 2.9, -0.2], target: [-4.5, 0.9, -1.3], angle: 0.72, penumbra: 0.45, color: 0xfff1d0, intensity: 60, distance: 9, shadow: true, toggle: 'lightL', flicker: 'buzz' },
+  doorR: { type: 'spot', pos: [5.6, 2.9, -0.2], target: [4.5, 0.9, -1.3], angle: 0.72, penumbra: 0.45, color: 0xfff1d0, intensity: 60, distance: 9, shadow: true, toggle: 'lightR', flicker: 'buzz' },
   whC: { type: 'point', pos: [-5.0, 2.8, -4.2], color: 0xcfe8dc, intensity: 0.55, distance: 7, flicker: 'fluoro', seed: 3 },
   ehC: { type: 'point', pos: [5.0, 2.8, -4.2], color: 0xcfe8dc, intensity: 0.55, distance: 7, flicker: 'fluoro', seed: 4 },
   moon: { type: 'point', pos: [0, 2.6, 2.0], color: 0x4a5a8a, intensity: 0.25, distance: 8, battery: true },
@@ -159,7 +158,7 @@ export const LIGHTS = {
   kitchen: { type: 'point', pos: [14.2, 2.9, -24.5], color: 0xffe0b0, intensity: 1.2, distance: 8, flicker: 'fluoro', seed: 14 },
 
   // Menú y galería
-  menuKey: { type: 'spot', pos: [1.4, 1.6, -31.2], target: [0, 2.9, -34.9], angle: 0.55, penumbra: 0.8, color: 0xffd0a0, intensity: 25, distance: 8, flicker: 'menu', shadow: true },
+  menuKey: { type: 'spot', pos: [1.4, 1.6, -31.2], target: [0, 2.9, -34.9], angle: 0.55, penumbra: 0.8, color: 0xffd0a0, intensity: 38, distance: 8, flicker: 'menu', shadow: true },
   galKey: { type: 'spot', pos: [2.6, 4.2, -29.6], target: [0, 1.9, -33.6], angle: 0.5, penumbra: 0.7, color: 0xfff0dc, intensity: 38, distance: 12, shadow: true },
   galRim: { type: 'spot', pos: [-2.8, 4.0, -36.5], target: [0, 2.0, -33.6], angle: 0.6, penumbra: 0.6, color: 0x9ab8ff, intensity: 30, distance: 10, shadow: true },
   galFill: { type: 'point', pos: [-3, 2.2, -29.5], color: 0xffb88a, intensity: 3, distance: 12 },

@@ -2,7 +2,7 @@
 import { CAMS, ROOMS, STAGE } from '../world/layout.js';
 
 const $ = (id) => document.getElementById(id);
-const SCREENS = ['loading', 'menu', 'options', 'custom', 'gallery', 'intro', 'hud', 'monitor', 'win', 'gameover', 'pause'];
+const SCREENS = ['loading', 'menu', 'paper', 'options', 'custom', 'gallery', 'intro', 'hud', 'monitor', 'win', 'gameover', 'pause'];
 
 export class UI {
   constructor() {
@@ -121,7 +121,6 @@ export class UI {
     document.querySelectorAll('#cam-map .cam-btn').forEach((g) => g.classList.toggle('active', g.dataset.cam === cam.id));
     this.setText('cam-id', `CAM ${cam.id}`);
     this.setText('cam-name', cam.name);
-    $('cam-audio-only').classList.toggle('hidden', !cam.audioOnly);
   }
 
   setTimestamp(night) {
@@ -180,9 +179,18 @@ export class UI {
 
   menuState(save) {
     $('btn-continue').disabled = save.night <= 1;
-    $('continue-night').textContent = save.night > 1 ? `(Noche ${Math.min(save.night, 5)})` : '';
+    $('continue-night').textContent = save.night > 1 ? `Noche ${Math.min(save.night, 5)}` : '';
     $('btn-night6').disabled = !save.beat5;
     $('btn-custom').disabled = !save.beat5;
+    const stars = (save.beat5 ? 1 : 0) + (save.beat6 ? 1 : 0) + (save.beatMax ? 1 : 0);
+    $('menu-stars').textContent = '★'.repeat(stars);
+    $('menu-stars').title = stars ? `${stars} de 3 estrellas` : '';
+  }
+
+  menuCam(id, label, time) {
+    this.setText('menu-cam-id', id);
+    this.setText('menu-cam-label', label);
+    this.setText('menu-cam-time', time);
   }
 
   gallery(name, desc) {

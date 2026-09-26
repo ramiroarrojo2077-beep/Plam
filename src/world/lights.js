@@ -126,6 +126,7 @@ export class LightRig {
     if (!def.battery && !this.state.power) return 0;
     if (def.toggle && !this.state[def.toggle]) return 0;
     let f = this.mult[id] ?? 1;
+    if (this.steady) return f;
     const s = def.seed || 0;
     switch (def.flicker) {
       case 'fluoro': {
