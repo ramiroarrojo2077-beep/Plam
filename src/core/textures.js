@@ -343,42 +343,100 @@ export function genCeiling(size = 512) {
 }
 
 // ---------------------------------------------------------------- Pelaje / fieltro
-// Textura de detalle en escala de grises: el color real lo ponen los vertex colors.
-export function genFur(size = 512, seed = 3) {
+// Pelaje de disfraz: fibras agrupadas en mechones con raíces oscuras y puntas claras,
+// zonas apelmazadas y desgastadas, manchas y suciedad. Escala de grises con leve tinte:
+// el color real lo ponen los vertex colors del animatrónico.
+export function genFur(size = 1024, seed = 3) {
   const rnd = mulberry32(seed);
   const n = new TileNoise(seed);
-  const H = new Float32Array(size * size);
-  const fibers = 34000;
-  for (let f = 0; f < fibers; f++) {
-    const x0 = rnd() * size;
-    const y0 = rnd() * size;
-    const ang = Math.PI / 2 + (n.fbm(x0 / size, y0 / size, 3, 3) - 0.5) * 1.8 + (rnd() - 0.5) * 0.5;
-    const len = 4 + rnd() * 11;
-    const w = 0.35 + rnd() * 0.65;
-    const dx = Math.cos(ang);
-    const dy = Math.sin(ang);
-    for (let t = 0; t < len; t++) {
-      const px = ((Math.floor(x0 + dx * t) % size) + size) % size;
-      const py = ((Math.floor(y0 + dy * t) % size) + size) % size;
-      H[py * size + px] += w * (1 - (t / len) * 0.6);
+  const N = size * size;
+  const H = new Float32Array(N);
+  const TIP = new Float32Array(N);
+  const wrapI = (x) => ((Math.floor(x) % size) + size) % size;
+  // Mechones: centros aleatorios con dirección propia
+  const clumps = [];
+  const nC = Math.round((size * size) / 190);
+  for (let i = 0; i < nC; i++) {
+    const x = rnd() * size;
+    const y = rnd() * size;
+    const flow = Math.PI / 2 + (n.fbm(x / size, y / size, 3, 3) - 0.5) * 2.2;
+    clumps.push({ x, y, a: flow + (rnd() - 0.5) * 0.6, r: 4 + rnd() * 5, len: 7 + rnd() * 10 });
+  }
+  for (const c of clumps) {
+    const fibers = Math.round(c.r * c.r * 1.1);
+    const dx = Math.cos(c.a);
+    const dy = Math.sin(c.a);
+    for (let f = 0; f < fibers; f++) {
+      const ang = rnd() * Math.PI * 2;
+      const rr = Math.sqrt(rnd()) * c.r;
+      let x = c.x + Math.cos(ang) * rr;
+      let y = c.y + Math.sin(ang) * rr;
+      const len = c.len * (0.6 + rnd() * 0.6);
+      // Las fibras convergen hacia el eje del mechón (efecto "punta")
+      const conv = 0.35 + rnd() * 0.3;
+      const tx = c.x + dx * len - x;
+      const ty = c.y + dy * len - y;
+      const ex = dx * len * (1 - conv) + tx * conv;
+      const ey = dy * len * (1 - conv) + ty * conv;
+      const L = Math.hypot(ex, ey);
+      const sx = ex / L;
+      const sy = ey / L;
+      const w = 0.5 + rnd() * 0.5;
+      for (let t = 0; t < L; t += 0.7) {
+        const k = t / L;
+        const px = wrapI(x + sx * t + Math.sin(k * 3 + f) * 0.6);
+        const py = wrapI(y + sy * t);
+        const i = py * size + px;
+        H[i] += w * (0.55 + k * 0.45);
+        TIP[i] += w * k * k;
+      }
     }
   }
+  // Pelusa fina suelta
+  for (let f = 0; f < size * size * 0.06; f++) {
+    const x = rnd() * size;
+    const y = rnd() * size;
+    const a = rnd() * Math.PI * 2;
+    const L = 3 + rnd() * 5;
+    for (let t = 0; t < L; t++) {
+      const i = wrapI(y + Math.sin(a) * t) * size + wrapI(x + Math.cos(a) * t);
+      H[i] += 0.25;
+      TIP[i] += 0.1;
+    }
+  }
+  const sorted = Float32Array.from(H).sort();
+  const maxH = sorted[Math.floor(N * 0.97)] || 1;
+  const maxT = sorted.length ? Float32Array.from(TIP).sort()[Math.floor(N * 0.97)] || 1 : 1;
   const P = new PixelMaps(size, size);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const i = y * size + x;
       const u = x / size;
       const v = y / size;
-      const h = Math.tanh(H[i] * 0.55);
-      const clump = n.fbm(u, v, 6, 4);
-      const grime = smoothstep(0.55, 0.85, n.fbm(u + 0.3, v + 0.7, 3, 4));
-      const val = (0.74 + h * 0.2 + clump * 0.1 - grime * 0.22) * 255;
-      P.set(i, val, val * 0.98, val * 0.95);
-      P.rough[i] = 0.78 + (1 - h) * 0.18 + grime * 0.05;
-      P.height[i] = h * 0.75 + clump * 0.25;
+      const h = Math.min(1, H[i] / maxH);
+      const tip = Math.min(1, TIP[i] / maxT);
+      const matted = smoothstep(0.52, 0.72, n.fbm(u + 0.13, v + 0.61, 2, 4));
+      const worn = smoothstep(0.62, 0.78, n.fbm(u + 0.7, v + 0.2, 3, 5));
+      const stain = smoothstep(0.6, 0.8, n.fbm(u + 0.4, v + 0.9, 2, 5));
+      const speck = smoothstep(0.78, 0.84, n.fbm(u, v, 24, 2));
+      const cavity = 1 - h;
+      // Albedo: raíz oscura -> punta clara; cavidades entre mechones sombreadas
+      const clumpV = n.fbm(u, v, 32, 2);
+      let val = 0.66 + (h - 0.5) * 0.16 + tip * 0.08 - cavity * 0.08 + (clumpV - 0.5) * 0.12;
+      val = lerp(val, 0.74, matted * 0.4);
+      val = lerp(val, 0.86, worn * 0.3);
+      val *= 1 - stain * 0.3 - speck * 0.18;
+      val = clamp(val, 0.08, 1);
+      const r = val * 255 * (1 - stain * 0.05);
+      const g = val * 255 * (1 - stain * 0.12);
+      const b = val * 255 * (1 - stain * 0.22);
+      P.set(i, r, g, b);
+      P.rough[i] = clamp(0.95 - tip * 0.1 - matted * 0.25 - worn * 0.2 + stain * 0.05, 0.4, 1);
+      // Relieve: se aplana en las zonas apelmazadas/desgastadas
+      P.height[i] = (h * 0.8 + tip * 0.2) * (1 - matted * 0.55 - worn * 0.35) + n.fbm(u, v, 8, 3) * 0.15;
     }
   }
-  return P.build(2.4);
+  return P.build(3.2);
 }
 
 // ---------------------------------------------------------------- Metal gastado
@@ -1075,4 +1133,48 @@ export function genRules(w = 384, h = 512) {
   rules.forEach((r, i) => ctx.fillText(r, 26, 130 + i * 36));
   agePaper(ctx, w, h, 413, 1);
   return canvasTexture(c, { repeat: false });
+}
+
+// ---------------------------------------------------------------- Mechones para el pelaje por capas
+// Canal R: longitud de cada pelo/mechón (0 = sin pelo). Canal G: variación de tono por mechón.
+export function genFurStrands(size = 512, seed = 17) {
+  const rnd = mulberry32(seed);
+  const n = new TileNoise(seed);
+  const L = new Float32Array(size * size);
+  const T = new Float32Array(size * size);
+  const wrapI = (x) => ((x % size) + size) % size;
+  const tufts = Math.round((size * size) / 14);
+  for (let k = 0; k < tufts; k++) {
+    const cx = rnd() * size;
+    const cy = rnd() * size;
+    const dens = n.fbm(cx / size, cy / size, 4, 3);
+    if (rnd() > 0.35 + dens * 0.9) continue;
+    const r = 1.0 + rnd() * 2.2;
+    const len = 0.35 + rnd() * 0.65;
+    const tone = rnd();
+    const r2 = Math.ceil(r);
+    for (let oy = -r2; oy <= r2; oy++) {
+      for (let ox = -r2; ox <= r2; ox++) {
+        const d = Math.hypot(ox + (cx % 1) - 0.5, oy + (cy % 1) - 0.5) / r;
+        if (d > 1) continue;
+        const i = wrapI(Math.floor(cy) + oy) * size + wrapI(Math.floor(cx) + ox);
+        const val = len * Math.sqrt(1 - d * d);
+        if (val > L[i]) {
+          L[i] = val;
+          T[i] = tone;
+        }
+      }
+    }
+  }
+  const c = makeCanvas(size, size);
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  for (let i = 0; i < L.length; i++) {
+    img.data[i * 4] = L[i] * 255;
+    img.data[i * 4 + 1] = T[i] * 255;
+    img.data[i * 4 + 2] = 0;
+    img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvasTexture(c, { srgb: false });
 }

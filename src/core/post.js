@@ -7,12 +7,13 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 
 export const QUALITY = {
-  low: { pixelRatio: 0.6, shadow: 512, bloom: false, smaa: false, aniso: 2 },
-  medium: { pixelRatio: 0.8, shadow: 1024, bloom: true, smaa: false, aniso: 4 },
-  high: { pixelRatio: 1, shadow: 1024, bloom: true, smaa: true, aniso: 8 },
-  ultra: { pixelRatio: 2, shadow: 2048, bloom: true, smaa: true, aniso: 16 },
+  low: { pixelRatio: 0.6, shadow: 512, bloom: false, smaa: false, aniso: 2, shells: 0, ao: false },
+  medium: { pixelRatio: 0.8, shadow: 1024, bloom: true, smaa: false, aniso: 4, shells: 5, ao: false },
+  high: { pixelRatio: 1, shadow: 1024, bloom: true, smaa: true, aniso: 8, shells: 8, ao: true },
+  ultra: { pixelRatio: 2, shadow: 2048, bloom: true, smaa: true, aniso: 16, shells: 12, ao: true },
 };
 
 const FinalShader = {
@@ -96,11 +97,16 @@ export class Post {
     const size = renderer.getSize(new THREE.Vector2());
     this.composer = new EffectComposer(renderer);
     this.renderPass = new RenderPass(scene, camera);
+    this.gtao = new GTAOPass(scene, camera, size.x, size.y);
+    this.gtao.updateGtaoMaterial({ radius: 0.45, distanceExponent: 1.5, thickness: 1.2, scale: 1.0, samples: 12 });
+    this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, radiusExponent: 1, rings: 2, samples: 12 });
+    this.gtao.blendIntensity = 0.9;
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.55, 0.45, 0.9);
     this.output = new OutputPass();
     this.smaa = new SMAAPass();
     this.final = new ShaderPass(FinalShader);
     this.composer.addPass(this.renderPass);
+    this.composer.addPass(this.gtao);
     this.composer.addPass(this.bloom);
     this.composer.addPass(this.output);
     this.composer.addPass(this.smaa);
@@ -116,6 +122,7 @@ export class Post {
 
   setQuality(q) {
     this.bloom.enabled = q.bloom;
+    this.gtao.enabled = q.ao;
     this.smaa.enabled = q.smaa;
   }
 

@@ -101,6 +101,8 @@ export function createMaterials(T) {
 
   // Animatrónicos (compartidos)
   M.teeth = phys({ color: 0xe6dcc0, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.3 });
+  M.teethV = phys({ color: 0xffffff, vertexColors: true, roughness: 0.42, roughnessMap: T.metal.rough, clearcoat: 0.45, clearcoatRoughness: 0.35 });
+  M.gum = std({ color: 0x2a0808, roughness: 0.55 });
   M.noseBlack = phys({ color: 0x0b0b0b, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.1 });
   M.mouth = std({ color: 0x160505, roughness: 0.85 });
   M.cable = std({ color: 0x111111, roughness: 0.55 });
@@ -108,11 +110,11 @@ export function createMaterials(T) {
   M.cableYellow = std({ color: 0x8a7412, roughness: 0.5 });
   M.boot = std({ color: 0x1c1c1c, roughness: 0.65 });
   M.hatBlack = phys({ color: 0x0d0d0f, roughness: 0.6, sheen: 0.6, sheenColor: new THREE.Color(0x333340), sheenRoughness: 0.5 });
-  M.beak = phys({ color: 0xe0761a, roughness: 0.45, clearcoat: 0.4, map: T.fur.map });
+  M.beak = phys({ color: 0xffffff, vertexColors: true, roughness: 0.62, roughnessMap: T.metal.rough, normalMap: T.plaster.normal, normalScale: new THREE.Vector2(0.35, 0.35), clearcoat: 0.25, clearcoatRoughness: 0.5 });
   M.guitar = phys({ color: 0xa3141a, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.08 });
   M.frosting = phys({ color: 0xe86fa0, roughness: 0.6, sheen: 0.4, sheenColor: new THREE.Color(0xffc0d8) });
   M.cupcake = std({ color: 0x9a6a3a, roughness: 0.8 });
-  M.bib = std({ map: T.bib, roughness: 0.9, side: THREE.DoubleSide });
+  M.bib = std({ map: T.bib, color: 0xa8a49a, roughness: 0.9, side: THREE.DoubleSide });
   M.candleFlame = std({ color: 0xffd080, emissive: 0xffa040, emissiveIntensity: 3 });
 
   M.powered = [M.bulb, M.fluoro, M.stageSign];
@@ -126,24 +128,78 @@ export function posterMaterial(tex, opts = {}) {
 }
 
 // Material de pelaje/fieltro para animatrónicos: el color real viene de los vertex colors.
-export function furMaterial(T, sheenHex = 0xffffff, repeat = 3) {
-  const map = T.fur.map.clone();
-  const normal = T.fur.normal.clone();
-  const rough = T.fur.rough.clone();
-  for (const t of [map, normal, rough]) {
-    t.repeat.set(repeat, repeat);
-    t.needsUpdate = true;
-  }
-  return new THREE.MeshPhysicalMaterial({
+// Las texturas se proyectan de forma triplanar en espacio de objeto: densidad uniforme en
+// todas las piezas, sin costuras de UV ni estiramiento en los polos.
+export function furMaterial(T, sheenHex = 0xffffff, scale = 4.2) {
+  const m = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
     vertexColors: true,
-    map,
-    normalMap: normal,
-    normalScale: new THREE.Vector2(0.9, 0.9),
-    roughnessMap: rough,
+    map: T.fur.map,
+    normalMap: T.fur.normal,
+    normalScale: new THREE.Vector2(1.1, 1.1),
+    roughnessMap: T.fur.rough,
     roughness: 1,
-    sheen: 0.55,
-    sheenRoughness: 0.7,
+    sheen: 0.45,
+    sheenRoughness: 0.75,
     sheenColor: new THREE.Color(sheenHex),
   });
+  applyTriplanar(m, scale);
+  return m;
+}
+
+export function applyTriplanar(m, scale) {
+  m.userData.triScale = { value: scale };
+  m.customProgramCacheKey = () => 'triplanar';
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.triScale = m.userData.triScale;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vTriPos;\nvarying vec3 vTriNrm;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTriPos = position;\nvTriNrm = normal;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vTriPos;
+varying vec3 vTriNrm;
+uniform float triScale;
+#ifndef USE_NORMALMAP_OBJECTSPACE
+uniform mat3 normalMatrix;
+#endif
+vec3 triBlend() {
+  vec3 b = pow(abs(normalize(vTriNrm)), vec3(4.0));
+  return b / (b.x + b.y + b.z);
+}
+vec4 triSample(sampler2D tex, vec3 b) {
+  vec3 p = vTriPos * triScale;
+  return texture2D(tex, p.zy) * b.x + texture2D(tex, p.xz + 0.37) * b.y + texture2D(tex, p.xy + 0.71) * b.z;
+}`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `vec3 triB = triBlend();
+diffuseColor *= triSample(map, triB);`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `float roughnessFactor = roughness;
+roughnessFactor *= triSample(roughnessMap, triB).g;`,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `{
+  vec3 p = vTriPos * triScale;
+  vec3 on = normalize(vTriNrm);
+  vec3 tX = texture2D(normalMap, p.zy).xyz * 2.0 - 1.0;
+  vec3 tY = texture2D(normalMap, p.xz + 0.37).xyz * 2.0 - 1.0;
+  vec3 tZ = texture2D(normalMap, p.xy + 0.71).xyz * 2.0 - 1.0;
+  tX.xy *= normalScale; tY.xy *= normalScale; tZ.xy *= normalScale;
+  tX = vec3(tX.xy + on.zy, abs(tX.z) * on.x);
+  tY = vec3(tY.xy + on.xz, abs(tY.z) * on.y);
+  tZ = vec3(tZ.xy + on.xy, abs(tZ.z) * on.z);
+  vec3 objN = normalize(tX.zyx * triB.x + tY.xzy * triB.y + tZ.xyz * triB.z);
+  normal = normalize(normalMatrix * objN) * faceDirection;
+}`,
+      );
+  };
+  return m;
 }

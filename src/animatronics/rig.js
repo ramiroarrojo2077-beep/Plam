@@ -264,7 +264,7 @@ export class Animatronic {
     // Mandíbula
     const J = this.jaw;
     J.value += (J.target - J.value) * Math.min(1, dt * 14);
-    let jaw = J.value + o.jaw.x;
+    let jaw = J.value + o.jaw.x + (this.jawRest || 0);
     if (J.chatter > 0) jaw += (Math.sin(t * 38) * 0.5 + 0.5) * J.chatter * 0.35;
     o.jaw.x = clamp(jaw, 0, this.jawMax || 0.7);
 

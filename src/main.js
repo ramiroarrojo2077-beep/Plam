@@ -11,6 +11,7 @@ import { buildOffice } from './world/office.js';
 import { LightRig } from './world/lights.js';
 import { CAMS, PLAYER_EYE, VIEW_LIGHTS, spotFor } from './world/layout.js';
 import { createAnimatronic, buildSpareParts, CHARACTERS } from './animatronics/models.js';
+import { setFurShells } from './animatronics/fur.js';
 import { Night, CAM_BY_ID } from './game/night.js';
 import { wp } from './game/nav.js';
 import { PhoneCall } from './game/phone.js';
@@ -91,7 +92,8 @@ class Game {
       ['cloth', 'Manteles', () => TX.genCloth()],
       ['door', 'Puertas de seguridad', () => TX.genDoorMetal()],
       ['metal', 'Endoesqueletos', () => TX.genMetal()],
-      ['fur', 'Pelaje de los animatrónicos', () => TX.genFur()],
+      ['fur', 'Pelaje de los animatrónicos', () => TX.genFur(1024)],
+      ['furStrands', 'Mechones de pelo', () => TX.genFurStrands(512)],
       ['celebrate', 'Carteles', () => TX.genCelebratePoster()],
       ['drawings', 'Dibujos infantiles', () => ['bear', 'bunny', 'chicken', 'fox', 'bear', 'bunny', 'chicken'].map((w, i) => TX.genKidsDrawing(i + 1, w))],
       ['newspaper', 'Periódico', () => TX.genNewspaper()],
@@ -184,6 +186,7 @@ class Game {
     const q = QUALITY[this.settings.quality] || QUALITY.high;
     this.post.setQuality(q);
     this.rig.setShadowSize(q.shadow);
+    if (this.chars) for (const c of Object.values(this.chars)) setFurShells(c.root, [c.fur, c.furDouble].filter(Boolean), this.T.furStrands, q.shells);
     if (resize) this.resize();
   }
 
@@ -483,7 +486,7 @@ class Game {
     c.twitch.rate = 0.3;
     c.eyeGlowTarget = 0.5;
     if (mode === 'idle') {
-      c.setPose(c.id === 'fox' ? 'coveHunch' : 'showcase', 2);
+      c.setPose({ bear: 'stageBear', bunny: 'guitar', chicken: 'cupcake', fox: 'coveHunch' }[c.id], 2);
       c.lookAt(null);
     } else if (mode === 'walk' || mode === 'run') {
       c.setPose('stand', 3);
