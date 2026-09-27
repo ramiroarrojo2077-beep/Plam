@@ -19,7 +19,9 @@ import { wp } from './game/nav.js';
 import { PhoneCall } from './game/phone.js';
 import { UI } from './ui/ui.js';
 
-const DEFAULT_SETTINGS = { quality: 'high', volume: 0.8, sens: 1, hourLen: 60, voice: true, edge: true };
+// En móviles y tabletas (puntero táctil) se arranca en calidad media.
+const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+const DEFAULT_SETTINGS = { quality: COARSE ? 'medium' : 'high', volume: 0.8, sens: 1, hourLen: 60, voice: true, edge: true };
 const EYE = new THREE.Vector3(...PLAYER_EYE);
 const KINDS = ['bear', 'bunny', 'chicken', 'fox'];
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));

@@ -75,7 +75,7 @@ window.shoot = (kind, view = 'full', pose = null, yaw = 0.35, extra = {}) => {
   }
   const head = c.j.head.getWorldPosition(new THREE.Vector3());
   head.y += 0.2 * c.body.scale.x;
-  const dirs = { full: [yaw, 0.05, 4.6, 1.1, 30], face: [yaw, 0.05, 1.25, null, 30], side: [Math.PI / 2, 0.05, 4.6, 1.1, 30], back: [Math.PI + 0.3, 0.1, 4.6, 1.1, 30], hands: [yaw, -0.1, 2.0, 0.9, 30], feet: [yaw, 0.3, 2.0, 0.2, 30], torso: [yaw, 0.0, 2.4, 1.4, 30] };
+  const dirs = { full: [yaw, 0.05, 4.6, 1.1, 30], face: [yaw, 0.05, 1.25, null, 30], icon: [yaw, 0.06, 1.75, null, 30], side: [Math.PI / 2, 0.05, 4.6, 1.1, 30], back: [Math.PI + 0.3, 0.1, 4.6, 1.1, 30], hands: [yaw, -0.1, 2.0, 0.9, 30], feet: [yaw, 0.3, 2.0, 0.2, 30], torso: [yaw, 0.0, 2.4, 1.4, 30] };
   const [a, p, d, cy, fov] = dirs[view];
   const target = cy === null ? head : new THREE.Vector3(0, cy, 0);
   camera.fov = fov;

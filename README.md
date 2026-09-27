@@ -19,6 +19,23 @@ npm run build:html   # regenera index.html (archivo único)
 
 `npm run build` genera la versión en varios archivos en `dist/` para cualquier hosting estático.
 
+### Android (APK)
+
+Descarga [`apk/CincoNochesEnBrunos.apk`](apk/CincoNochesEnBrunos.apk) en el móvil, ábrelo y acepta
+"instalar apps de origen desconocido". Requiere Android 7.0 o superior con WebView actualizado (WebGL 2).
+Se juega a pantalla completa y en horizontal; el botón atrás pausa la noche o vuelve al menú.
+
+Para regenerarlo (Java 17+, python3 y acceso a Maven Central):
+
+```bash
+npm run build:html   # primero el index.html
+npm run build:apk    # android/ -> apk/CincoNochesEnBrunos.apk
+```
+
+El script descarga aapt2, las clases de Android, dx y apksig desde Maven Central (en `android/.tools`) y
+firma con `android/brunos.keystore` (contraseña `cinconoches`), una clave para instalar a mano; para
+publicarlo en Google Play habría que firmar con una clave propia (otro keystore y `KS_PASS`).
+
 ### Controles
 
 | Acción | Teclado / ratón |
