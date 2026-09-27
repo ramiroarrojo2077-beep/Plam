@@ -86,3 +86,45 @@ window.shoot = (kind, view = 'full', pose = null, yaw = 0.35, extra = {}) => {
   return true;
 };
 window.ready = true;
+
+// Simulación de locomoción para revisar pasos e IK: prep() prepara la escena y adv() avanza
+// n fotogramas y renderiza con una cámara lateral que sigue al personaje.
+let simT = 0;
+window.prep = (kind, mode = 'walk', extra = {}) => {
+  for (const k in chars) chars[k].root.visible = k === kind;
+  const c = chars[kind];
+  c.place(new THREE.Vector3(0, 0, extra.z0 ?? -3), extra.h0 ?? 0);
+  c.setPose(extra.pose || 'stand');
+  c.snapPose();
+  c.twitch.rate = 0;
+  c.sway = 1;
+  c.lookAt(null);
+  c.treadmill = null;
+  if (mode === 'walk' || mode === 'run') {
+    const speed = extra.speed || (mode === 'run' ? 5.5 : 1.1);
+    c.walkTo([new THREE.Vector3(0, 0, extra.z1 ?? 3)], { speed, style: mode, faceAt: extra.faceAt ? new THREE.Vector3(...extra.faceAt) : null });
+  } else if (mode === 'turn') c.faceTowards(extra.tx ?? 3, extra.tz ?? -3);
+  window.cur = c;
+  return true;
+};
+window.adv = (n, view = 'side', dt = 1 / 60) => {
+  const c = window.cur;
+  for (let i = 0; i < n; i++) {
+    simT += dt;
+    c.update(dt, simT);
+  }
+  scene.updateMatrixWorld(true);
+  const p = c.root.position;
+  const a = view === 'side' ? Math.PI / 2 : view === 'front' ? 0.25 : view === 'back' ? Math.PI - 0.4 : 0.9;
+  const d = view === 'legs' ? 2.6 : 4.4;
+  const cy = view === 'legs' ? 0.5 : 1.0;
+  camera.fov = 30;
+  camera.updateProjectionMatrix();
+  camera.position.set(p.x + Math.sin(a) * d, cy + 0.15, p.z + Math.cos(a) * d);
+  camera.lookAt(p.x, cy, p.z);
+  floor.position.set(p.x, 0, p.z);
+  key.position.set(p.x + 2.2, 3.6, p.z + 3.2);
+  key.target.position.copy(p);
+  renderer.render(scene, camera);
+  return { z: +p.z.toFixed(2), h: +c.heading.toFixed(2), feet: c.feet.map((F) => (F.swing ? 'S' : 'P') + F.pitch.toFixed(2)) };
+};

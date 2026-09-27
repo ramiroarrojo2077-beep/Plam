@@ -185,12 +185,13 @@ export function buildProps(scene, M, T, rig) {
   B.add(tube([V(-16.2, 0.93, -34.6), V(-15.9, 0.95, -34.2), V(-16.0, 0.93, -33.8), V(-15.8, 0.94, -33.5)], 0.008, 20, 5), M.cableRed, null, { cast: false });
 
   // ---------------- Armario de limpieza
-  shelf(-1.2, -0.55, -9.2, 3.2, [0.3, 0.9, 1.5, 2.1], Math.PI / 2);
+  // Estantería pegada a la pared este (girada: el largo va a lo largo de z)
+  shelf(-2.15, 0.45, -9.5, 0.55, [0.3, 0.9, 1.5], Math.PI / 2);
   B.add(new THREE.CylinderGeometry(0.2, 0.17, 0.32, 20), new THREE.MeshStandardMaterial({ color: 0xb8a018, roughness: 0.5 }), mat4(-3.0, 0.16, -10.4));
   B.add(new THREE.CylinderGeometry(0.012, 0.012, 1.4, 8), M.deskWood, mat4(-3.15, 0.75, -10.3, 0.1, 0, -0.25));
-  for (let i = 0; i < 4; i++) B.add(boxGeo, M.cardboard, mat4(-0.9, 0.3 + 0.03 + 0.6 * i + 0.22, -8.3 - (i % 2) * 0.9, 0, 0.1 * i), { worldUV: 0.5 });
-  B.add(new THREE.CylinderGeometry(0.06, 0.06, 0.25, 12), M.plasticRed, mat4(-0.85, 1.05, -9.7));
-  B.add(new THREE.CylinderGeometry(0.05, 0.05, 0.22, 12), M.balloons[1], mat4(-0.85, 1.04, -9.5));
+  for (let i = 0; i < 3; i++) B.add(boxGeo, M.cardboard, mat4(-0.9, 0.3 + 0.03 + 0.6 * i + 0.22, [-8.65, -9.55, -10.3][i], 0, 0.1 * i), { worldUV: 0.5 });
+  B.add(new THREE.CylinderGeometry(0.06, 0.06, 0.25, 12), M.plasticRed, mat4(-0.85, 1.05, -10.35));
+  B.add(new THREE.CylinderGeometry(0.05, 0.05, 0.22, 12), M.balloons[1], mat4(-0.85, 1.04, -10.15));
 
   // ---------------- Cocina
   B.add(new THREE.BoxGeometry(0.8, 0.9, 6.2), M.paintedMetal, mat4(16.6, 0.45, -24.5), { worldUV: 0.8 });

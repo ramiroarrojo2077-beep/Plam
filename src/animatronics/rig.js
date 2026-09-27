@@ -1,8 +1,12 @@
 // Sistema de animación procedural de los animatrónicos:
-// servos con muelle subamortiguado (inercia y pequeño rebote mecánico), ciclo de
-// caminar/correr con impacto de talón, pasos al girar, movimiento secundario (cabeza,
-// orejas y mandíbula reaccionan a la aceleración y a cada pisada), mirada con sacadas
-// oculares, espasmos, actuaciones en el escenario, acecho en la puerta, párpados y mandíbula.
+// servos con muelle subamortiguado (inercia y pequeño rebote mecánico) con rigidez por
+// articulación y acción superpuesta (el tronco arranca antes que brazos, manos y cabeza),
+// pies clavados al suelo con cinemática inversa de dos huesos (rodado talón-punta, arco de
+// balanceo, pasos al girar y pasos de reajuste al detenerse), pelvis que carga el peso sobre
+// el pie de apoyo, arranque y frenado con aceleración real, inclinación en las curvas,
+// cabeza que se adelanta al giro, movimiento secundario (cabeza, orejas y mandíbula reaccionan
+// a la aceleración y a cada pisada), mirada con muelle y ojos que se adelantan a la cabeza,
+// sacadas oculares, espasmos, actuaciones en el escenario, acecho en la puerta, párpados y mandíbula.
 import * as THREE from 'three';
 
 const TAU = Math.PI * 2;
@@ -10,6 +14,14 @@ const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
 const tmpQ = new THREE.Quaternion();
 const tmpM = new THREE.Matrix4();
+const tmpE = new THREE.Euler();
+const tmpG = new THREE.Vector3();
+const tmpA = new THREE.Vector3();
+const qA = new THREE.Quaternion();
+const qB = new THREE.Quaternion();
+const qFK = new THREE.Quaternion();
+const AX_X = new THREE.Vector3(1, 0, 0);
+const AX_Y = new THREE.Vector3(0, 1, 0);
 
 const wrap = (a) => {
   while (a > Math.PI) a -= TAU;
@@ -17,6 +29,24 @@ const wrap = (a) => {
   return a;
 };
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (t) => {
+  t = clamp(t, 0, 1);
+  return t * t * (3 - 2 * t);
+};
+const jointBase = (n) => n.replace(/[LR]$/, '');
+
+// Rigidez relativa de cada servo (las articulaciones pesadas responden más despacio) y
+// retardo con el que cada una empieza a moverse al cambiar de pose (acción superpuesta).
+const STIFF = { hips: 0.75, spine: 0.8, chest: 0.85, neck: 1, head: 1.1, jaw: 1.4, shoulder: 0.9, elbow: 1, wrist: 1.2, fingers: 1.3, thigh: 0.85, knee: 0.9, ankle: 1, ear: 1.2, ear2: 1.15 };
+const DELAY = { hips: 0, spine: 0, chest: 0.04, neck: 0.08, head: 0.12, jaw: 0.1, shoulder: 0.05, elbow: 0.1, wrist: 0.15, fingers: 0.19, thigh: 0, knee: 0.02, ankle: 0.04, ear: 0.16, ear2: 0.2 };
+
+// Longitud de zancada (m) según la velocidad: al ir más rápido se alarga el paso.
+const strideFor = (speed, style) => (style === 'run' ? clamp(0.55 + speed * 0.13, 1.0, 1.5) : clamp(0.3 + speed * 0.19, 0.44, 0.72));
+
+// Pie: distancias desde el tobillo (unidades del cuerpo) al pivote de la punta y del talón.
+const TOE = 0.22;
+const HEEL = 0.08;
 
 // Muelle amortiguado 1D para movimiento secundario.
 class Spring {
@@ -151,18 +181,57 @@ export class Animatronic {
     this.time = 0;
     this.treadmill = null;
     this.perform = null;
-    this.turnStep = 0;
     this.vel = {};
     this.sec = { headP: new Spring(140, 10), headR: new Spring(140, 10), ear: new Spring(70, 4.5), ear2: new Spring(50, 3), jaw: new Spring(160, 7), body: new Spring(200, 14) };
     this.lastChest = null;
     this.lastVel = new THREE.Vector3();
     this.acc = new THREE.Vector3();
     this.sacc = { t: 1, yaw: 0, pitch: 0 };
+    this.sec.gaze = new Spring(18, 8);
+    this.sec.gazeP = new Spring(18, 8);
+    this.stiff = {};
+    this.pend = {};
+    // Pies con IK: posición clavada en el suelo, balanceo y reajustes.
+    this.ik = true;
+    this.ikW = 1;
+    this.leg = null;
+    this.feetReset = true;
+    this.tread = new THREE.Vector3();
+    this.lastG = null;
+    this.feet = ['L', 'R'].map((side) => ({
+      side,
+      sx: side === 'L' ? 1 : -1,
+      mode: 'idle',
+      swing: false,
+      s: 0,
+      dur: 0.3,
+      su: 0,
+      plant: new THREE.Vector3(),
+      yaw: 0,
+      pitch: 0,
+      from: new THREE.Vector3(),
+      fromYaw: 0,
+      fromPitch: 0,
+      target: new THREE.Vector3(),
+      ankle: new THREE.Vector3(),
+      prev: new THREE.Vector3(),
+      corr: new THREE.Vector3(),
+      neutral: new THREE.Vector3(),
+    }));
+    this.stepCool = 0;
+    this.pelvis = { x: 0, drop: 0, shiftT: 3 + Math.random() * 4, shiftGoal: 0, shift: 0 };
+    this.turnVel = 0;
+    this.turnRate = 0;
+    this.leanFwd = 0;
+    this.lead = 0;
+    this.prevCur = 0;
+    this.prevHeading = null;
     for (const n of JOINTS) {
       this.cur[n] = new THREE.Vector3();
       this.goal[n] = new THREE.Vector3();
       this.out[n] = new THREE.Vector3();
       this.vel[n] = new THREE.Vector3();
+      this.stiff[n] = STIFF[jointBase(n)] || 1;
     }
   }
 
@@ -177,19 +246,42 @@ export class Animatronic {
       this.goal[name] = new THREE.Vector3();
       this.out[name] = new THREE.Vector3();
       this.vel[name] = new THREE.Vector3();
+      this.stiff[name] = STIFF[jointBase(name)] || 1;
     }
     return o;
   }
 
+  // Cambio de pose: el tronco arranca primero y los extremos (manos, dedos, cabeza, orejas)
+  // se suman con un pequeño retardo, como en un movimiento real. Los cambios muy rápidos
+  // (sustos) arrancan todos a la vez.
   setPose(name, speed = null) {
     const p = typeof name === 'string' ? POSES[name] : name;
-    for (const n in this.goal) this.goal[n].set(0, 0, 0);
-    if (p) for (const [n, v] of Object.entries(p)) if (this.goal[n]) this.goal[n].set(v[0], v[1], v[2]);
     if (typeof name === 'string') this.poseName = name;
     if (speed) this.poseSpeed = speed;
+    const lag = this.poseSpeed < 6 ? 2.2 / this.poseSpeed : 0;
+    for (const n in this.goal) {
+      const v = p && p[n];
+      const x = v ? v[0] : 0;
+      const y = v ? v[1] : 0;
+      const z = v ? v[2] : 0;
+      const d = (DELAY[jointBase(n)] || 0) * lag * (0.75 + Math.random() * 0.5);
+      if (d < 0.005) {
+        this.goal[n].set(x, y, z);
+        delete this.pend[n];
+      } else this.pend[n] = { t: d, x, y, z };
+    }
+  }
+
+  flushPending() {
+    for (const n in this.pend) {
+      const q = this.pend[n];
+      this.goal[n].set(q.x, q.y, q.z);
+    }
+    this.pend = {};
   }
 
   snapPose() {
+    this.flushPending();
     for (const n in this.goal) {
       this.cur[n].copy(this.goal[n]);
       this.vel[n].set(0, 0, 0);
@@ -212,6 +304,10 @@ export class Animatronic {
     this.walk.path = null;
     this.walk.weight = 0;
     this.walk.cur = 0;
+    this.ik = true;
+    this.feetReset = true;
+    this.turnVel = 0;
+    this.prevHeading = null;
     if (heading !== null) this.setHeading(heading);
   }
 
@@ -229,7 +325,7 @@ export class Animatronic {
     W.idx = 0;
     W.speed = speed;
     W.style = style;
-    W.stride = style === 'run' ? 1.25 : 0.62;
+    W.stride = strideFor(speed, style);
     W.onArrive = onArrive;
     W.faceAt = faceAt;
     W.from.copy(this.root.position);
@@ -255,19 +351,24 @@ export class Animatronic {
   // ------------------------------------------------------------ actualización
   update(dt, t) {
     this.time += dt;
+    this.updatePending(dt);
     this.updatePath(dt);
 
     // Servos: muelle subamortiguado con velocidad angular máxima (arranque y frenada con
-    // inercia y un pequeño rebote al llegar, como un motor real).
-    const wN = 2.6 * this.poseSpeed;
+    // inercia y un pequeño rebote al llegar, como un motor real). Las articulaciones
+    // pesadas (cadera, columna) son más lentas que las muñecas o la mandíbula.
+    const wN0 = 2.6 * this.poseSpeed;
     const zeta = 0.68;
-    const vmax = this.poseSpeed * 1.9;
-    const steps = Math.max(1, Math.ceil((wN * dt) / 0.2));
+    const vmax0 = this.poseSpeed * 1.9;
+    const steps = Math.max(1, Math.ceil((wN0 * 1.4 * dt) / 0.2));
     const h = dt / steps;
     for (const n in this.goal) {
       const c = this.cur[n];
       const g = this.goal[n];
       const v = this.vel[n];
+      const k = this.stiff[n] || 1;
+      const wN = wN0 * k;
+      const vmax = vmax0 * k;
       for (let i = 0; i < steps; i++) {
         v.x = clamp(v.x + (wN * wN * (g.x - c.x) - 2 * zeta * wN * v.x) * h, -vmax, vmax);
         v.y = clamp(v.y + (wN * wN * (g.y - c.y) - 2 * zeta * wN * v.y) * h, -vmax, vmax);
@@ -291,7 +392,8 @@ export class Animatronic {
     const W = this.walk;
     let bob = 0;
     if (W.weight > 0.001) bob = this.applyWalk(o, W.weight, W.phase, W.style);
-    if (this.j.hips) this.j.hips.position.y = this.hipBase - bob;
+    this.updateSteering(dt, o);
+    this.updateStance(dt, o);
 
     this.updateTwitch(dt, o);
     this.updateLook(dt, o);
@@ -324,6 +426,10 @@ export class Animatronic {
       const r = J.userData.rest || (J.userData.rest = J.rotation.clone());
       J.rotation.set(r.x + v.x, r.y + v.y, r.z + v.z);
     }
+    if (this.j.hips) {
+      this.j.hips.position.set(0, this.hipBase - bob, 0);
+      this.updateFeet(dt, o);
+    }
     // Dedos: la curvatura se reparte por las falanges
     for (const side of ['L', 'R']) {
       const curl = o['fingers' + side].x;
@@ -341,83 +447,111 @@ export class Animatronic {
     this.root.rotation.y = this.heading;
   }
 
+  updatePending(dt) {
+    for (const n in this.pend) {
+      const q = this.pend[n];
+      q.t -= dt;
+      if (q.t <= 0) {
+        this.goal[n].set(q.x, q.y, q.z);
+        delete this.pend[n];
+      }
+    }
+  }
+
   updatePath(dt) {
     const W = this.walk;
     const pos = this.root.position;
+    W.lookAhead = 0;
     if (W.path) {
+      const run = W.style === 'run';
       const tgt = W.path[W.idx];
       const dx = tgt.x - pos.x;
       const dz = tgt.z - pos.z;
       const dist = Math.hypot(dx, dz);
+      const last = W.idx === W.path.length - 1;
       if (dist > 0.02) {
-        const desired = Math.atan2(dx, dz);
+        const dir = Math.atan2(dx, dz);
+        let desired = dir;
+        // Anticipar la esquina: el cuerpo empieza a girar hacia el tramo siguiente antes de
+        // llegar y la cabeza mira hacia allí todavía antes.
+        const nxt = W.path[W.idx + 1];
+        if (nxt) {
+          const nd = Math.atan2(nxt.x - tgt.x, nxt.z - tgt.z);
+          const r = run ? 1.1 : 0.5;
+          if (dist < r) desired = dir + wrap(nd - dir) * (1 - dist / r) * 0.45;
+          const r2 = run ? 2.6 : 1.7;
+          if (dist < r2) W.lookAhead = clamp(wrap(nd - this.heading), -0.9, 0.9) * (1 - dist / r2);
+        }
         const diff = wrap(desired - this.heading);
-        const turnRate = W.style === 'run' ? 7 : 2.4;
+        const turnRate = run ? 7 : 2.6;
         this.heading = wrap(this.heading + clamp(diff, -turnRate * dt, turnRate * dt));
-        const align = Math.cos(diff);
-        const want = W.speed * (align > 0.8 ? 1 : Math.max(0.12, align) * 0.6);
-        W.cur += (want - W.cur) * Math.min(1, dt * (W.style === 'run' ? 6 : 3));
+        const align = Math.cos(wrap(dir - this.heading));
+        let want = W.speed * (align > 0.8 ? 1 : Math.max(0.12, align) * 0.6);
+        // Frenada progresiva antes del destino final (los pasos se acortan)
+        if (last) want = Math.min(want, Math.max(0.2, Math.sqrt(2 * (run ? 14 : 1.7) * dist)));
+        const accel = run ? 9 : 2.3;
+        W.cur += clamp(want - W.cur, -accel * 1.8 * dt, accel * dt);
       }
       const segLen = Math.max(0.001, Math.hypot(tgt.x - W.from.x, tgt.z - W.from.z));
       const step = W.cur * dt;
+      let moved = step;
+      let arrived = false;
       if (step >= dist) {
+        moved = dist;
         pos.x = tgt.x;
         pos.z = tgt.z;
         pos.y = tgt.y;
         W.from.copy(tgt);
         W.idx++;
-        W.phase += (dist / W.stride) * Math.PI;
-        if (W.idx >= W.path.length) {
-          W.path = null;
-          if (W.faceAt) this.faceHeading = Math.atan2(W.faceAt.x - pos.x, W.faceAt.z - pos.z);
-          const cb = W.onArrive;
-          W.onArrive = null;
-          if (cb) cb();
-        }
+        arrived = W.idx >= W.path.length;
       } else if (dist > 0) {
         pos.x += (dx / dist) * step;
         pos.z += (dz / dist) * step;
         const prog = 1 - (dist - step) / segLen;
         pos.y = W.from.y + (tgt.y - W.from.y) * clamp(prog, 0, 1);
-        const prev = W.phase;
-        W.phase += (step / W.stride) * Math.PI;
-        this.checkFootsteps(prev, W.phase);
       }
+      // La cadencia nunca baja de un mínimo: a poca velocidad da pasos cortos en vez de
+      // quedarse con un pie en el aire.
+      const prev = W.phase;
+      const vmin = run ? 1.6 : 0.45;
+      W.phase += (Math.max(moved, vmin * dt) / W.stride) * Math.PI;
+      this.checkFootsteps(prev, W.phase);
       W.weight = Math.min(1, W.weight + dt * 3);
+      if (arrived) {
+        W.path = null;
+        if (W.faceAt) this.faceHeading = Math.atan2(W.faceAt.x - pos.x, W.faceAt.z - pos.z);
+        const cb = W.onArrive;
+        W.onArrive = null;
+        if (cb) cb();
+      }
     } else if (this.treadmill) {
-      // Caminar en el sitio (galería)
+      // Caminar en el sitio (galería): el suelo virtual se desplaza bajo los pies
       const run = this.treadmill === 'run';
       W.style = this.treadmill;
-      W.stride = run ? 1.25 : 0.62;
+      const v = run ? 5.2 : 1.1;
+      W.stride = strideFor(v, W.style);
+      W.cur += clamp(v - W.cur, -12 * dt, (run ? 9 : 2.3) * dt);
       W.weight = Math.min(1, W.weight + dt * 3);
+      this.tread.x += Math.sin(this.heading) * W.cur * dt;
+      this.tread.z += Math.cos(this.heading) * W.cur * dt;
       const prev = W.phase;
-      W.phase += ((dt * (run ? 6 : 1.15)) / W.stride) * Math.PI;
+      W.phase += ((Math.max(W.cur, run ? 1.6 : 0.45) * dt) / W.stride) * Math.PI;
       this.checkFootsteps(prev, W.phase);
     } else {
       W.weight = Math.max(0, W.weight - dt * 3);
       W.cur = 0;
-      let turning = false;
+      // Giro en el sitio con aceleración y frenada; los pies dan pasitos (ver updateFeet)
       if (this.faceHeading !== null) {
         const diff = wrap(this.faceHeading - this.heading);
-        const step = 1.9 * dt;
-        if (Math.abs(diff) <= step) {
+        const want = Math.sign(diff) * Math.min(2.2, Math.sqrt(2 * 5 * Math.abs(diff)));
+        this.turnVel += clamp(want - this.turnVel, -8 * dt, 8 * dt);
+        const step = this.turnVel * dt;
+        if (Math.abs(diff) < 0.004 || (Math.abs(step) >= Math.abs(diff) && Math.sign(step) === Math.sign(diff))) {
           this.heading = this.faceHeading;
           this.faceHeading = null;
-        } else {
-          this.heading = wrap(this.heading + Math.sign(diff) * step);
-          turning = Math.abs(diff) > 0.12;
-        }
-      }
-      // Girar en el sitio dando pasitos en vez de deslizarse
-      this.turnStep = turning ? Math.min(1, this.turnStep + dt * 4) : Math.max(0, this.turnStep - dt * 3);
-      if (this.turnStep > 0.01) {
-        W.style = 'walk';
-        W.stride = 0.62;
-        const prev = W.phase;
-        W.phase += dt * 3.4 * this.turnStep;
-        W.weight = Math.max(W.weight, this.turnStep * 0.42);
-        this.checkFootsteps(prev, W.phase);
-      }
+          this.turnVel = 0;
+        } else this.heading = wrap(this.heading + step);
+      } else this.turnVel = 0;
     }
   }
 
@@ -435,43 +569,391 @@ export class Animatronic {
     }
   }
 
+  // Parte "de animación" del paso: brazos, tronco y cabeza. Las piernas las resuelve la IK
+  // (updateFeet); el ciclo de piernas por ángulos solo se usa cuando la IK está apagada.
   applyWalk(o, w, phase, style) {
     const run = style === 'run';
+    const W = this.walk;
     const A = run
       ? { hip: 0.8, knee: 1.4, arm: 1.0, bob: 0.075, lean: 0.4, elbow: -1.4 }
       : { hip: 0.34, knee: 0.74, arm: 0.28, bob: 0.03, lean: 0.06, elbow: -0.24 };
+    // La amplitud de brazos y tronco crece con la velocidad real
+    const spd = clamp(W.cur / (run ? 5 : 1.1), 0, 1.25);
+    const wa = w * (0.3 + 0.7 * spd);
+    const wl = w * (1 - this.ikW);
     let impact = 0;
     for (const side of ['L', 'R']) {
       const ph = phase + (side === 'R' ? Math.PI : 0);
       const sn = Math.sin(ph);
       const cs = Math.cos(ph);
-      const hip = -A.hip * sn;
-      // Rodilla: flexión en el balanceo y leve amortiguación al apoyar el talón
-      const knee = A.knee * Math.pow(Math.max(0, cs), 1.5) + 0.05 + Math.pow(Math.max(0, sn), 10) * 0.12;
-      o['thigh' + side].x += hip * w;
-      o['knee' + side].x += knee * w;
-      // Pie: talón al aterrizar, despegue con la punta
-      o['ankle' + side].x += (-(hip + knee) * 0.85 - Math.pow(Math.max(0, sn), 6) * 0.18 + Math.pow(Math.max(0, -cs), 4) * 0.12 * (run ? 1.6 : 1)) * w;
-      // Brazos con retraso respecto a las piernas (inercia)
+      if (wl > 0.001) {
+        const hip = -A.hip * sn;
+        // Rodilla: flexión en el balanceo y leve amortiguación al apoyar el talón
+        const knee = A.knee * Math.pow(Math.max(0, cs), 1.5) + 0.05 + Math.pow(Math.max(0, sn), 10) * 0.12;
+        o['thigh' + side].x += hip * wl;
+        o['knee' + side].x += knee * wl;
+        // Pie: talón al aterrizar, despegue con la punta
+        o['ankle' + side].x += (-(hip + knee) * 0.85 - Math.pow(Math.max(0, sn), 6) * 0.18 + Math.pow(Math.max(0, -cs), 4) * 0.12 * (run ? 1.6 : 1)) * wl;
+      }
+      // Brazos en oposición a las piernas, con retraso (inercia) y codo que se dobla más
+      // al ir hacia delante que al ir hacia atrás
       const sa = Math.sin(ph - 0.35);
-      o['shoulder' + side].x += A.arm * sa * w;
-      o['shoulder' + side].z += (side === 'L' ? 1 : -1) * (run ? 0.12 : 0.04) * w;
-      o['elbow' + side].x += A.elbow * (run ? 1 : 0.55 + 0.45 * Math.max(0, -Math.sin(ph - 0.7))) * w;
+      o['shoulder' + side].x += A.arm * sa * wa;
+      o['shoulder' + side].z += (side === 'L' ? 1 : -1) * (run ? 0.12 : 0.04 + Math.max(0, -sa) * 0.03) * w;
+      o['elbow' + side].x += A.elbow * (run ? 1 : 0.55 + 0.45 * Math.max(0, -Math.sin(ph - 0.7))) * wa;
+      o['wrist' + side].x += Math.sin(ph - 0.8) * (run ? 0.12 : 0.06) * wa;
       o['fingers' + side].x += (run ? -0.25 : 0.1) * w;
       impact = Math.max(impact, Math.pow(Math.max(0, sn), 12));
     }
-    o.hips.z += Math.sin(phase) * 0.045 * w;
-    o.hips.y += Math.sin(phase) * (run ? 0.12 : 0.06) * w;
-    o.chest.y -= Math.sin(phase) * (run ? 0.2 : 0.1) * w;
-    o.chest.z -= Math.sin(phase) * 0.03 * w;
-    o.spine.x += (A.lean + impact * 0.035) * w;
+    o.hips.z += Math.sin(phase) * 0.045 * wa;
+    o.hips.y += Math.sin(phase) * (run ? 0.12 : 0.07) * wa;
+    // El pecho gira al revés que la pelvis y la cabeza compensa para mirar al frente
+    o.chest.y -= Math.sin(phase) * (run ? 0.2 : 0.11) * wa;
+    o.neck.y += Math.sin(phase) * (run ? 0.1 : 0.05) * wa;
+    o.chest.z -= Math.sin(phase) * 0.03 * wa;
+    o.spine.x += (A.lean * (0.4 + 0.6 * spd) + impact * 0.035) * w;
     o.neck.x -= A.lean * 0.45 * w;
-    o.head.x += (Math.sin(phase * 2) * 0.022 - impact * 0.03) * w;
+    o.head.x += (Math.sin(phase * 2) * 0.022 - impact * 0.03) * wa;
     if (run) {
       o.neck.x += 0.12 * w;
       o.jaw.x += 0.22 * w;
     }
-    return (A.bob * Math.abs(Math.sin(phase)) + impact * (run ? 0.03 : 0.018)) * w;
+    return (A.bob * Math.abs(Math.sin(phase)) + impact * (run ? 0.03 : 0.018)) * wl;
+  }
+
+  // Inclinación al acelerar/frenar, peralte en las curvas y cabeza que se adelanta al giro.
+  updateSteering(dt, o) {
+    const W = this.walk;
+    if (dt <= 0) return;
+    const acc = (W.cur - this.prevCur) / dt;
+    this.prevCur = W.cur;
+    this.leanFwd += (clamp(acc, -10, 10) - this.leanFwd) * Math.min(1, dt * 5);
+    const rate = this.prevHeading === null ? 0 : wrap(this.heading - this.prevHeading) / dt;
+    this.prevHeading = this.heading;
+    this.turnRate += (clamp(rate, -12, 12) - this.turnRate) * Math.min(1, dt * 6);
+    const run = W.style === 'run';
+    const ww = W.weight;
+    o.spine.x += clamp(this.leanFwd * (run ? 0.018 : 0.035), -0.1, 0.14) * ww;
+    const bank = clamp(Math.atan((this.turnRate * W.cur) / 9.8) * 0.6, -0.3, 0.3) * ww;
+    o.spine.z -= bank * 0.6;
+    o.chest.z -= bank * 0.4;
+    let lead = W.lookAhead * ww;
+    if (this.faceHeading !== null && !W.path) lead += clamp(wrap(this.faceHeading - this.heading), -0.8, 0.8);
+    this.lead += (lead - this.lead) * Math.min(1, dt * 6);
+    o.chest.y += this.lead * 0.08;
+    o.neck.y += this.lead * 0.3;
+    o.head.y += this.lead * 0.42;
+  }
+
+  // Reparto del peso en reposo: de vez en cuando carga el peso sobre una pierna (la pelvis
+  // se desplaza y cae del lado libre, el pecho compensa).
+  updateStance(dt, o) {
+    const P = this.pelvis;
+    P.shiftT -= dt;
+    if (P.shiftT <= 0) {
+      P.shiftT = 4 + Math.random() * 7;
+      P.shiftGoal = Math.random() < 0.3 ? 0 : (Math.random() < 0.5 ? -1 : 1) * (0.018 + Math.random() * 0.014);
+    }
+    P.shift += (P.shiftGoal - P.shift) * Math.min(1, dt * 1.3);
+    const k = P.shift * this.sway * (1 - this.walk.weight) * this.ikW;
+    P.idle = k;
+    o.hips.z += k * 1.6;
+    o.spine.z -= k * 0.9;
+    o.chest.z -= k * 0.6;
+  }
+
+  // ------------------------------------------------------------ pies e IK de piernas
+  legInfo() {
+    const j = this.j;
+    const l1 = j.kneeL.position.length();
+    const l2 = j.ankleL.position.length();
+    return { l1, l2, ankleH: this.hipBase + j.thighL.position.y - l1 - l2 };
+  }
+
+  // Posición del tobillo según la pose (cinemática directa), en espacio del cuerpo y con la
+  // pelvis a su altura de reposo.
+  fkAnkle(side, o, out) {
+    const th = this.j['thigh' + side];
+    const kn = this.j['knee' + side];
+    const an = this.j['ankle' + side];
+    const rk = kn.userData.rest;
+    const rt = th.userData.rest;
+    const k = o['knee' + side];
+    const t = o['thigh' + side];
+    tmpE.set((rk ? rk.x : 0) + k.x, (rk ? rk.y : 0) + k.y, (rk ? rk.z : 0) + k.z);
+    out.copy(an.position).applyEuler(tmpE).add(kn.position);
+    tmpE.set((rt ? rt.x : 0) + t.x, (rt ? rt.y : 0) + t.y, (rt ? rt.z : 0) + t.z);
+    out.applyEuler(tmpE).add(th.position);
+    out.y += this.hipBase;
+    return out;
+  }
+
+  // Tobillo respecto al punto de apoyo cuando el pie pivota sobre la punta (p > 0, talón
+  // levantado) o sobre el talón (p < 0, punta levantada). Devuelve un desplazamiento en mundo.
+  pivot(p, yaw, out) {
+    const s = this.body.scale.x;
+    const aH = this.leg.ankleH;
+    let dy;
+    let dz;
+    if (p >= 0) {
+      dy = aH * Math.cos(p) + TOE * Math.sin(p);
+      dz = aH * Math.sin(p) + TOE * (1 - Math.cos(p));
+    } else {
+      dy = aH * Math.cos(p) - HEEL * Math.sin(p);
+      dz = aH * Math.sin(p) - HEEL * (1 - Math.cos(p));
+    }
+    return out.set(Math.sin(yaw) * dz * s, dy * s, Math.cos(yaw) * dz * s);
+  }
+
+  // Espacio del cuerpo -> mundo (suelo virtual incluido) y viceversa.
+  bodyToWorld(x, y, z, G, h, out) {
+    const s = this.body.scale.x;
+    const c = Math.cos(h);
+    const sn = Math.sin(h);
+    return out.set(G.x + s * (x * c + z * sn), G.y + s * y, G.z + s * (-x * sn + z * c));
+  }
+
+  worldToBody(p, G, h, out) {
+    const s = this.body.scale.x;
+    const c = Math.cos(h);
+    const sn = Math.sin(h);
+    const x = p.x - G.x;
+    const z = p.z - G.z;
+    return out.set((x * c - z * sn) / s, (p.y - G.y) / s, (x * sn + z * c) / s);
+  }
+
+  updateFeet(dt, o) {
+    const j = this.j;
+    if (!j.thighL || !j.ankleL) return;
+    this.ikW = this.ik ? Math.min(1, this.ikW + dt * 4) : 0;
+    if (this.ikW <= 0) {
+      this.feetReset = true;
+      return;
+    }
+    const L = this.leg || (this.leg = this.legInfo());
+    const W = this.walk;
+    const P = this.pelvis;
+    const s = this.body.scale.x;
+    const h = this.heading;
+    const G = tmpG.copy(this.root.position).add(this.tread);
+    if (this.lastG && this.lastG.distanceToSquared(G) > 1) this.feetReset = true;
+    (this.lastG || (this.lastG = new THREE.Vector3())).copy(G);
+
+    // Apoyo neutro de cada pie según la pose y cuánto hay que bajar la pelvis para que
+    // una pose con rodillas dobladas mantenga los pies en el suelo.
+    let crouch = 0;
+    for (const F of this.feet) {
+      this.fkAnkle(F.side, o, F.neutral);
+      crouch = Math.max(crouch, F.neutral.y - L.ankleH);
+    }
+    const gait = !!(W.path || this.treadmill);
+    const run = W.style === 'run';
+    const toeOut = 0.05;
+
+    if (this.feetReset) {
+      this.feetReset = false;
+      for (const F of this.feet) {
+        this.bodyToWorld(F.neutral.x, 0, F.neutral.z, G, h, F.plant);
+        F.yaw = h + F.sx * toeOut;
+        F.pitch = 0;
+        F.swing = false;
+        F.mode = gait ? 'gait' : 'idle';
+        F.corr.set(0, 0, 0);
+        this.pivot(0, F.yaw, tmpA);
+        F.ankle.copy(F.plant).add(tmpA);
+        F.prev.copy(F.ankle);
+      }
+      P.drop = 0;
+      P.x = 0;
+    }
+
+    let shift = 0;
+    let mid = 0;
+    let idleBob = 0;
+    if (gait) {
+      const duty = run ? 0.3 : 0.6;
+      const hs = run ? -0.08 : -0.26;
+      const toeOff = run ? 0.75 : 0.5;
+      const ratio = this.treadmill ? 1 : W.cur / Math.max(W.cur, run ? 1.6 : 0.45, 1e-3);
+      const fx = Math.sin(h);
+      const fz = Math.cos(h);
+      for (const F of this.feet) {
+        this.switchMode(F, 'gait');
+        const ph = W.phase + (F.side === 'R' ? Math.PI : 0);
+        let u = (ph - Math.PI / 2) / TAU;
+        u -= Math.floor(u);
+        if (u < duty) {
+          // Apoyo: el pie queda clavado; rueda del talón a la planta y despega con la punta
+          const su = u / duty;
+          if (F.swing) {
+            F.swing = false;
+            F.plant.copy(F.target);
+            F.yaw = h + F.sx * toeOut;
+            F.fixCorr = true;
+          }
+          F.su = su;
+          F.pitch = su < 0.14 ? hs * (1 - smooth(su / 0.14)) : su < 0.55 ? 0 : toeOff * Math.pow(smooth((su - 0.55) / 0.45), 1.2);
+          this.pivot(F.pitch, F.yaw, tmpA);
+          F.ankle.copy(F.plant).add(tmpA);
+          const load = Math.sin(Math.PI * su);
+          shift += F.sx * load * (run ? 0.012 : 0.028);
+          mid = Math.max(mid, load);
+        } else {
+          // Balanceo: arco hasta el apoyo previsto (donde estará el cuerpo al aterrizar)
+          const sw = (u - duty) / (1 - duty);
+          if (!F.swing) {
+            F.swing = true;
+            F.from.copy(F.ankle);
+            F.fromYaw = F.yaw;
+          }
+          F.s = sw;
+          const ahead = ratio * W.stride * (2 * (1 - sw) * (1 - duty) + duty);
+          const nx = F.neutral.x * (run ? 0.7 : 0.92);
+          this.bodyToWorld(nx, 0, F.neutral.z, G, h, F.target);
+          F.target.x += fx * ahead;
+          F.target.z += fz * ahead;
+          F.target.y = this.root.position.y;
+          const e = smooth(sw);
+          F.pitch = sw < 0.4 ? lerp(toeOff, -0.05, smooth(sw / 0.4)) : lerp(-0.05, hs, smooth((sw - 0.4) / 0.6));
+          const yawTo = h + F.sx * toeOut;
+          F.yaw = F.fromYaw + wrap(yawTo - F.fromYaw) * e;
+          this.pivot(hs, yawTo, tmpA);
+          F.ankle.lerpVectors(F.from, tmpA.add(F.target), e);
+          F.ankle.y += (run ? 0.22 : 0.1) * s * Math.sin(Math.PI * Math.pow(sw, run ? 0.6 : 0.8));
+        }
+      }
+    } else {
+      // Reposo: los pies se quedan donde están; si la pose o el giro los deja lejos de su
+      // sitio, da un paso corto para recolocarlos (uno cada vez).
+      let hN = h;
+      if (this.faceHeading !== null) hN = h + clamp(wrap(this.faceHeading - h), -0.5, 0.5);
+      this.stepCool -= dt;
+      let worst = null;
+      let worstErr = 0;
+      let swinging = false;
+      for (const F of this.feet) {
+        this.switchMode(F, 'idle');
+        this.bodyToWorld(F.neutral.x, 0, F.neutral.z, G, hN, F.target);
+        F.target.y = this.root.position.y;
+        const yawTo = hN + F.sx * toeOut;
+        if (F.swing) {
+          swinging = true;
+          F.s = Math.min(1, F.s + dt / F.dur);
+          const e = smooth(F.s);
+          F.pitch = lerp(F.fromPitch, 0, e) - Math.sin(Math.PI * F.s) * 0.1;
+          F.yaw = F.fromYaw + wrap(yawTo - F.fromYaw) * e;
+          this.pivot(0, yawTo, tmpA);
+          F.ankle.lerpVectors(F.from, tmpA.add(F.target), e);
+          F.ankle.y += 0.07 * s * Math.sin(Math.PI * F.s);
+          idleBob = Math.max(idleBob, Math.sin(Math.PI * F.s) * 0.012);
+          const other = this.feet[F.side === 'L' ? 1 : 0];
+          shift += other.sx * 0.03 * Math.sin(Math.PI * Math.min(1, F.s * 1.4));
+          if (F.s >= 1) {
+            F.swing = false;
+            F.plant.copy(F.target);
+            F.yaw = yawTo;
+            F.pitch = 0;
+            this.stepCool = 0.05;
+            this.footImpact('shuffle');
+            if (this.onFootstep) this.onFootstep(this, F.side, F.plant.clone(), 'shuffle');
+          }
+        } else {
+          F.pitch += (0 - F.pitch) * Math.min(1, dt * 9);
+          this.pivot(F.pitch, F.yaw, tmpA);
+          F.ankle.copy(F.plant).add(tmpA);
+          const err = Math.hypot(F.plant.x - F.target.x, F.plant.z - F.target.z) / s + Math.abs(wrap(F.yaw - yawTo)) * 0.25;
+          if (err > worstErr) {
+            worstErr = err;
+            worst = F;
+          }
+        }
+      }
+      if (!swinging && worst && worstErr > 0.085 && this.stepCool <= 0) {
+        const F = worst;
+        F.swing = true;
+        F.s = 0;
+        F.dur = clamp(0.24 + worstErr * 0.35, 0.26, 0.42) * clamp(2.2 / this.poseSpeed, 0.6, 1.2);
+        F.from.copy(F.ankle);
+        F.fromYaw = F.yaw;
+        F.fromPitch = F.pitch;
+      }
+      shift += P.idle || 0;
+    }
+
+    // Suavizado de discontinuidades (cambios de modo) y posición final de cada tobillo
+    const decay = Math.exp(-dt * 16);
+    for (const F of this.feet) {
+      if (F.fixCorr) {
+        F.fixCorr = false;
+        F.corr.copy(F.prev).sub(F.ankle);
+      } else F.corr.multiplyScalar(decay);
+      F.ankle.add(F.corr);
+      F.prev.copy(F.ankle);
+    }
+
+    // Pelvis: carga lateral sobre el pie de apoyo, sube y baja con el paso y baja lo que
+    // haga falta para que las piernas alcancen los pies.
+    P.x += (shift - P.x) * Math.min(1, dt * 10);
+    const ww = gait ? W.weight : 0;
+    const bob = gait ? (run ? 0.055 * mid : 0.024 * (1 - mid)) * ww : idleBob;
+    const base = this.hipBase - crouch - (run ? 0.06 : 0.012) * ww - bob;
+    const thY = base + j.thighL.position.y;
+    const R = (L.l1 + L.l2) * 0.992;
+    let need = 0;
+    for (const F of this.feet) {
+      this.worldToBody(F.ankle, G, h, tmpA);
+      const wgt = F.swing ? smooth((F.s - 0.55) / 0.45) : 1;
+      if (wgt <= 0) continue;
+      const tx = j['thigh' + F.side].position.x + P.x;
+      const dxz = Math.hypot(tmpA.x - tx, tmpA.z - j['thigh' + F.side].position.z);
+      const maxY = tmpA.y + Math.sqrt(Math.max(0, R * R - dxz * dxz));
+      need = Math.max(need, (thY - maxY) * wgt);
+    }
+    P.drop += (need - P.drop) * Math.min(1, dt * (need > P.drop ? 30 : 10));
+    const w = this.ikW;
+    const hips = j.hips;
+    hips.position.x = P.x * w;
+    hips.position.y = lerp(hips.position.y, base - P.drop, w);
+    hips.updateMatrix();
+    tmpM.copy(hips.matrix).invert();
+
+    // IK analítica de dos huesos para cada pierna y orientación del pie en el mundo
+    for (const F of this.feet) {
+      const th = j['thigh' + F.side];
+      const kn = j['knee' + F.side];
+      const an = j['ankle' + F.side];
+      this.worldToBody(F.ankle, G, h, tmpA).applyMatrix4(tmpM).sub(th.position);
+      const D = clamp(tmpA.length(), Math.abs(L.l1 - L.l2) + 0.02, (L.l1 + L.l2) * 0.9995);
+      const cosI = clamp((L.l1 * L.l1 + L.l2 * L.l2 - D * D) / (2 * L.l1 * L.l2), -1, 1);
+      const k = Math.PI - Math.acos(cosI);
+      const ey = -L.l1 - L.l2 * Math.cos(k);
+      const ez = -L.l2 * Math.sin(k);
+      const c = Math.asin(clamp(tmpA.x / -ey, -1, 1));
+      const a = wrap(Math.atan2(tmpA.z, tmpA.y) - Math.atan2(ez, ey * Math.cos(c)));
+      th.rotation.set(lerp(th.rotation.x, a, w), th.rotation.y * (1 - w), lerp(th.rotation.z, c, w));
+      kn.rotation.set(lerp(kn.rotation.x, k, w), kn.rotation.y * (1 - w), kn.rotation.z * (1 - w));
+      // Pie: orientación deseada en el cuerpo = giro (yaw) y cabeceo (pitch) del pie
+      qFK.copy(an.quaternion);
+      qA.copy(hips.quaternion).multiply(th.quaternion).multiply(kn.quaternion).invert();
+      qB.setFromAxisAngle(AX_Y, wrap(F.yaw - h)).multiply(tmpQ.setFromAxisAngle(AX_X, F.pitch));
+      qA.multiply(qB);
+      if (w < 1) qA.slerp(qFK, 1 - w);
+      an.quaternion.copy(qA);
+    }
+  }
+
+  switchMode(F, mode) {
+    if (F.mode === mode) return;
+    F.mode = mode;
+    if (F.swing) {
+      // Continúa el paso desde donde está, sin saltos
+      F.from.copy(F.ankle);
+      F.fromYaw = F.yaw;
+      F.fromPitch = F.pitch;
+      F.s = 0;
+      F.dur = 0.24;
+    }
+    F.fixCorr = true;
   }
 
   // Movimiento secundario: la cabeza, las orejas y la mandíbula siguen con retraso a la
@@ -521,7 +1003,7 @@ export class Animatronic {
 
   // Impacto de una pisada: pequeña sacudida mecánica.
   footImpact(style) {
-    const k = style === 'run' ? 1.6 : 1;
+    const k = style === 'run' ? 1.6 : style === 'shuffle' ? 0.45 : 1;
     this.sec.jaw.v += 2.2 * k;
     this.sec.headP.v += 0.9 * k;
     this.sec.ear.v -= 2.4 * k;
@@ -605,6 +1087,10 @@ export class Animatronic {
     }
   }
 
+  // Mirada: la cabeza gira con aceleración y frenada suaves (muelle crítico con velocidad
+  // máxima) y el cuello aporta parte del giro; los ojos apuntan antes que la cabeza porque
+  // siempre se orientan al objetivo desde la posición actual de la cabeza. En los giros
+  // grandes suele parpadear. Sin objetivo, la cabeza acompaña un poco a las sacadas.
   updateLook(dt, o) {
     const L = this.look;
     let dYaw = 0;
@@ -617,10 +1103,26 @@ export class Animatronic {
       dYaw = clamp(Math.atan2(tmpV2.x, tmpV2.z), -1.25, 1.25);
       dPitch = clamp(Math.atan2(-tmpV2.y, Math.hypot(tmpV2.x, tmpV2.z)), -0.6, 0.7);
     }
+    const gap = Math.abs(dYaw - L.yaw) + Math.abs(dPitch - L.pitch);
+    if (L.active && gap > 0.7 && !L.shifting) {
+      L.shifting = true;
+      if (Math.random() < 0.75) this.blink = 1;
+    } else if (gap < 0.2) L.shifting = false;
     L.weight += ((L.active ? 1 : 0) - L.weight) * Math.min(1, dt * 2);
-    const step = L.speed * dt;
-    L.yaw += clamp(dYaw - L.yaw, -step, step);
-    L.pitch += clamp(dPitch - L.pitch, -step, step);
+    if (dt > 0) {
+      const wn = clamp(L.speed * 3.2, 3, 45);
+      const vmax = L.speed * 1.5;
+      const n = Math.max(1, Math.ceil((wn * dt) / 0.15));
+      const hh = dt / n;
+      L.vYaw = L.vYaw || 0;
+      L.vPitch = L.vPitch || 0;
+      for (let i = 0; i < n; i++) {
+        L.vYaw = clamp(L.vYaw + (wn * wn * (dYaw - L.yaw) - 2 * wn * L.vYaw) * hh, -vmax, vmax);
+        L.vPitch = clamp(L.vPitch + (wn * wn * (dPitch - L.pitch) - 2 * wn * L.vPitch) * hh, -vmax, vmax);
+        L.yaw += L.vYaw * hh;
+        L.pitch += L.vPitch * hh;
+      }
+    }
     const w = L.weight;
     o.head.x *= 1 - w * 0.6;
     o.head.y *= 1 - w * 0.8;
@@ -628,6 +1130,10 @@ export class Animatronic {
     o.head.y += L.yaw * 0.65 * w;
     o.neck.x += L.pitch * 0.3 * w;
     o.head.x += L.pitch * 0.7 * w;
+    // La cabeza acompaña parcialmente a los ojos cuando miran alrededor
+    const free = (1 - w) * this.sway;
+    o.head.y += this.sec.gaze.step(this.sacc.yaw * 0.4 * free, dt);
+    o.head.x += this.sec.gazeP.step(this.sacc.pitch * 0.3 * free, dt);
   }
 
   updateLids(dt) {
@@ -655,8 +1161,9 @@ export class Animatronic {
       sc.pitch = calm ? 0 : (Math.random() - 0.5) * 0.22;
     }
     for (const e of this.eyes) {
-      let yaw = L.active ? 0 : sc.yaw;
-      let pitch = L.active ? 0 : sc.pitch;
+      // Sin objetivo: los ojos hacen la sacada y descuentan lo que ya giró la cabeza
+      let yaw = L.active ? 0 : sc.yaw - this.sec.gaze.x;
+      let pitch = L.active ? 0 : sc.pitch - this.sec.gazeP.x;
       if (L.active) {
         e.pivot.getWorldPosition(tmpV);
         tmpV2.subVectors(L.target, tmpV);

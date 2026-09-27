@@ -429,6 +429,7 @@ class Game {
     this.setView('jumpscare');
     for (const c of Object.values(this.chars)) if (c !== char && c.root.position.distanceTo(EYE) < 3) c.root.visible = false;
     char.stop();
+    char.ik = false;
     char.root.visible = true;
     char.setHollow(false);
     char.perform = null;

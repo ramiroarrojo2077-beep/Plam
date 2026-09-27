@@ -181,12 +181,12 @@ export class AudioEngine {
       dest = f;
     }
     const run = style === 'run';
-    const k = run ? 0.8 : 1;
+    const k = run ? 0.8 : style === 'shuffle' ? 0.4 : 1;
     this.osc({ freq: 78 + Math.random() * 10, freqEnd: 36, dur: run ? 0.14 : 0.22, gain: 0.9 * k, dest });
     this.noise({ type: 'lowpass', freq: 520, dur: run ? 0.08 : 0.13, gain: 0.45 * k, dest });
     this.noise({ type: 'bandpass', freq: 2300 + Math.random() * 600, q: 9, dur: 0.07, gain: 0.22 * k, when: 0.01, dest });
     this.osc({ type: 'square', freq: 170 + Math.random() * 30, dur: 0.05, gain: 0.04, when: 0.005, dest });
-    if (!run && Math.random() < 0.35) {
+    if (!run && Math.random() < (style === 'shuffle' ? 0.6 : 0.35)) {
       this.osc({ type: 'sawtooth', freq: 240, freqEnd: 300, dur: 0.28, gain: 0.018, attack: 0.05, when: 0.08, dest });
     }
   }
