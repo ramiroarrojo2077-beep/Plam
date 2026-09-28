@@ -758,7 +758,7 @@ class Game {
       this.state = 'paused';
       this.ui.show('pause', true);
       this.audio.ctx?.suspend();
-      if ('speechSynthesis' in window) speechSynthesis.pause();
+      this.phone?.pause();
     } else if (this.state === 'paused') {
       this.state = 'night';
       this.ui.show('pause', false);
@@ -766,7 +766,7 @@ class Game {
       this.ui.show('hud', true);
       if (this.night?.monitorUp) this.ui.show('monitor', true);
       this.audio.ctx?.resume();
-      if ('speechSynthesis' in window) speechSynthesis.resume();
+      this.phone?.resume();
     }
   }
 

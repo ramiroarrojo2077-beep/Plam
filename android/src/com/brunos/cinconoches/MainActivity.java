@@ -19,6 +19,7 @@ import android.webkit.WebViewClient;
 // pantalla siempre encendida) que carga el index.html autocontenido desde los assets del APK.
 public class MainActivity extends Activity {
     private WebView web;
+    private TtsBridge tts;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -55,6 +56,8 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+        tts = new TtsBridge(this, web);
+        web.addJavascriptInterface(tts, "AndroidTTS");
         setContentView(web);
         immersive();
         if (state != null) web.restoreState(state);
@@ -82,6 +85,7 @@ public class MainActivity extends Activity {
         super.onPause();
         if (web != null) {
             web.evaluateJavascript("(function(){var g=window.__game;if(!g)return;if(g.state==='night')g.togglePause();if(g.audio&&g.audio.ctx)g.audio.ctx.suspend();})()", null);
+            if (tts != null) tts.stop();
             web.onPause();
         }
     }
@@ -125,6 +129,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (tts != null) {
+            tts.shutdown();
+            tts = null;
+        }
         if (web != null) {
             web.destroy();
             web = null;
